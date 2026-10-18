@@ -86,3 +86,11 @@ export function getFallbackResponse(): any {
     score: 0,
   };
 }
+
+export function getProviderStatus(): { provider: string; configured: boolean } {
+  const token = process.env.AI_API_KEY;
+  return {
+    provider: token ? "openrouter" : "none",
+    configured: !!token,
+  };
+}
