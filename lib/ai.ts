@@ -5,8 +5,7 @@ Analyze the video transcript fragment provided with its timestamp.
 Evaluate it strictly through the lens of the user's goal.
 Deliver an objective, intermediate opinion — no toxicity, no subjective "good/bad" verdicts.
 If the author presents an alternative or non-standard viewpoint, do NOT label it as fake science or misinformation.
-Correctly mark it as "alternative" and briefly compare it with the prevailing consensus in this domain
-(scientific, industrial, or IT standard).
+Correctly mark it as "alternative" and briefly compare it with the prevailing consensus in this domain.
 Completely ignore filler, fluff, and ad integrations unrelated to the topic.
 Respond ONLY with a single valid JSON object, no markdown, no prose outside JSON.`;
 
@@ -23,30 +22,49 @@ export async function analyzeChunkWithAI(
     throw new Error("No AI API key configured. Set AI_API_KEY in .env.local");
   }
 
-  const content = `${SYSTEM_PROMPT}\n\nВремя фрагмента: ${chunkTime}\nФокус пользователя: ${userFocus}\n\nТекст фрагмента:\n${chunkText}`;
+  // Укорачиваем промпт, чтобы уложиться в FREE лимит токенов
+  const content = `${SYSTEM_PROMPT}\n\nTime: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText.slice(0, 500)}`;
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "AI Anatomy YouTube Filter",
-    },
-    body: JSON.stringify({
-      model: modelName,
-      messages: [{ role: "user", content }],
-      response_format: { type: "json_object" },
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "AI Anatomy YouTube Filter",
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [{ role: "user", content }],
+        max_tokens: 256,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      }),
+    });
+  } catch (err) {
+    return getFallbackResponse();
+  }
 
+  // 402 = insufficient credits (FREE тариф исчерпан) — не падаем, возвращаем fallback
   if (!res.ok) {
-    const errText = await res.text();
+    const errText = await res.text().catch(() => "");
+    if (res.status === 402 || res.status === 429) {
+      return getFallbackResponse();
+    }
     throw new Error(`OpenRouter error ${res.status}: ${errText}`);
   }
 
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
+  if (!data) {
+    return getFallbackResponse();
+  }
+
   const rawContent = data.choices?.[0]?.message?.content ?? "";
+  if (!rawContent) {
+    return getFallbackResponse();
+  }
 
   // Очищаем возможные markdown-теги ```json перед парсингом
   const cleaned = rawContent
