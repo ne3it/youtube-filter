@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { SummaryCard } from "@/components/dashboard/summary-card";
 import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
-import type { LexicalStatsItem, TimelineDataItem } from "@/types";
+import { useHistory } from "@/hooks/use-local-storage";
+import type { HistoryEntry, LexicalStatsItem, TimelineDataItem } from "@/types";
 
 const PRESETS = [
   { id: "academic", label: "Академический" },
@@ -22,6 +24,28 @@ export default function Home() {
   const [timelineData, setTimelineData] = useState<TimelineDataItem[]>([]);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
+const [summary, setSummary] = useState("");
+  const [coreConcept, setCoreConcept] = useState("");
+  const [dominantPerspective, setDominantPerspective] = useState<"consensus" | "alternative">("consensus");
+  const [loaderStep, setLoaderStep] = useState(0);
+
+  const { entries: history, addEntry, isHydrated } = useHistory();
+
+  // Циклические сообщения лоадера
+  const loaderMessages = [
+    "Скачиваем автоматические субтитры...",
+    "Фильтруем пустую воду...",
+    "Сверяем тезисы автора с научным консенсусом...",
+  ];
+
+  useEffect(() => {
+    if (!loading) return;
+    setLoaderStep(0);
+    const interval = setInterval(() => {
+      setLoaderStep((prev) => (prev + 1) % loaderMessages.length);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   const timelineSegments = timelineData.map((t) => ({
     time: t.timestamp,
@@ -49,6 +73,8 @@ export default function Home() {
     setTimelineData([]);
     setSelectedWord(null);
     setActiveChunkId(null);
+    setSummary("");
+    setCoreConcept("");
 
     try {
       // 1. Получаем чанки субтитров
@@ -81,8 +107,57 @@ export default function Home() {
         throw new Error(err.error || "Анализ не удался");
       }
       const data = await analyzeRes.json();
-      setLexicalStats(data.lexicalStats || []);
-      setTimelineData(data.timelineData || []);
+      const stats = data.lexicalStats || [];
+      const timeline = data.timelineData || [];
+      setLexicalStats(stats);
+      setTimelineData(timeline);
+
+      // Агрегируем summary из первых чанков
+      const aggregatedSummary = timeline
+        .map((t: TimelineDataItem) => t.summary)
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(" ");
+      setSummary(aggregatedSummary || "Анализ завершён.");
+
+      // Определяем доминантную позицию
+      const altCount = timeline.filter((t: TimelineDataItem) => t.perspective === "alternative").length;
+      const consensusCount = timeline.filter((t: TimelineDataItem) => t.perspective === "consensus").length;
+      setDominantPerspective(altCount > consensusCount ? "alternative" : "consensus");
+
+      // 3. Сохраняем в историю
+      const entry: HistoryEntry = {
+        id: `${videoId}-${Date.now()}`,
+        videoId,
+        url: url.trim(),
+        title: `YouTube video ${videoId}`,
+        channel: "Unknown channel",
+        userFocus: focus,
+        result: {
+          videoId,
+          title: `YouTube video ${videoId}`,
+          channel: "Unknown channel",
+          summary: aggregatedSummary,
+          conceptScores: [],
+          semanticTimeline: [],
+          wordCloud: stats.map((l: LexicalStatsItem) => ({
+            word: l.text,
+            weight: l.value / (stats[0]?.value || 1),
+            sentiment: "neutral" as const,
+          })),
+          theses: timeline.map((t: TimelineDataItem) => ({
+            id: `thesis-${t.chunkId}`,
+            claim: t.summary,
+            support: t.analysis,
+            confidence: t.score / 100,
+            timestamp: t.chunkId * 60000,
+          })),
+          coreConcept: stats[0]?.text || "",
+          generatedAt: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+      addEntry(entry);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
@@ -102,6 +177,25 @@ export default function Home() {
           </p>
 
           {/* Форма */}
+          {loading ? (
+            <div className="rounded-md border border-card-border bg-black/40 p-6 font-mono text-sm">
+              <div className="flex items-center gap-2 text-brand-yellow">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-yellow" />
+                <span>YT.ANATOMY CONSOLE v0.1</span>
+              </div>
+              <div className="mt-3 space-y-1 text-muted">
+                <p>{"> "}{loaderMessages[loaderStep]}</p>
+                <p>{"> "}{loaderStep >= 1 ? "Фильтруем пустую воду..." : "Ожидание..."}</p>
+                <p>{"> "}{loaderStep >= 2 ? "Сверяем тезисы..." : "Ожидание..."}</p>
+              </div>
+              <div className="mt-4 h-1 w-full overflow-hidden rounded bg-card-border">
+                <div
+                  className="h-full bg-brand-yellow transition-all duration-500"
+                  style={{ width: `${((loaderStep + 1) / loaderMessages.length) * 100}%` }}
+                />
+              </div>
+            </div>
+          ) : (
           <div className="mt-10 space-y-6 text-left">
             <div>
               <input
@@ -158,7 +252,7 @@ export default function Home() {
                 onClick={handleAnalyze}
                 className="group w-full rounded-none bg-brand-yellow px-4 py-3 text-base font-semibold text-ink transition-all duration-150 hover:bg-[#FFD200] hover:shadow-neon-yellow active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {loading ? "Анализ..." : "Запустить анализ"}
+                Запустить анализ
               </button>
             </div>
 
@@ -168,11 +262,19 @@ export default function Home() {
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Результаты анализа */}
         {timelineData.length > 0 && (
           <div className="mt-12 w-full max-w-4xl space-y-6 animate-fade-in">
+            <SummaryCard
+              userFocus={focus}
+              summary={summary}
+              coreConcept={coreConcept}
+              dominantPerspective={dominantPerspective}
+            />
+
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <TimelineChart
@@ -196,14 +298,52 @@ export default function Home() {
           </div>
         )}
 
-        {/* Место под историю проверок */}
-        <div className="mt-16 w-full max-w-2xl">
-          <div className="rounded-none border border-dashed border-card-border bg-card/40 p-6">
-            <p className="text-center text-sm text-muted">
-              История проверок (подключим LocalStorage позже)
-            </p>
+        {/* История проверок */}
+        {isHydrated && history.length > 0 && (
+          <div className="mt-16 w-full max-w-4xl">
+            <h3 className="mb-3 text-sm font-semibold text-foreground">
+              История прошлых проверок
+            </h3>
+            <div className="space-y-3">
+              {history.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => {
+                    setLexicalStats(
+                      entry.result.wordCloud.map((w) => ({
+                        text: w.word,
+                        value: Math.round(w.weight * 100),
+                      }))
+                    );
+                    setTimelineData(entry.result.theses.map((t, i) => ({
+                      chunkId: i,
+                      timestamp: "00:00 - 05:00",
+                      summary: t.claim,
+                      perspective: "consensus" as const,
+                      analysis: t.support,
+                      score: Math.round(t.confidence * 100),
+                    })));
+                    setSummary(entry.result.summary);
+                    setCoreConcept(entry.result.coreConcept);
+                    setActiveChunkId(null);
+                  }}
+                  className="w-full rounded-lg border border-card-border bg-card p-3 text-left transition-colors hover:border-brand-yellow"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs text-brand-yellow">
+                      {new Date(entry.createdAt).toLocaleString()}
+                    </span>
+                    <span className="text-xs text-muted">{entry.userFocus || "без фокуса"}</span>
+                  </div>
+                  <p className="mt-1 truncate text-sm text-foreground">
+                    {entry.title}
+                  </p>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </main>
     </div>
   );

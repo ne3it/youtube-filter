@@ -1,71 +1,84 @@
-import type { AnalysisResult, ConceptScore } from "@/types";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { formatTimestamp } from "@/lib/youtube";
 
 export interface SummaryCardProps {
-  result: AnalysisResult;
-  userFocus?: string;
+  userFocus: string;
+  summary: string;
+  coreConcept?: string;
+  dominantPerspective?: "consensus" | "alternative";
 }
 
-export function SummaryCard({ result, userFocus }: SummaryCardProps) {
-  const topConcept = result.conceptScores[0];
+export function SummaryCard({
+  userFocus,
+  summary,
+  coreConcept,
+  dominantPerspective = "consensus",
+}: SummaryCardProps) {
+  const isAlternative = dominantPerspective === "alternative";
 
   return (
-    <Card className="p-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="accent" size="sm">
-          Analysis
-        </Badge>
-        <Badge variant="muted" size="sm">
-          {formatTimestamp(0)} — {formatTimestamp(result.semanticTimeline[result.semanticTimeline.length - 1]?.t ?? 0)}
-        </Badge>
-      </div>
-
-      <h3 className="mt-3 text-lg font-semibold leading-snug text-ink">
-        {result.title}
-      </h3>
-      <p className="mt-1 text-sm text-ink/60">{result.channel}</p>
-
-      <p className="mt-3 text-sm leading-relaxed text-ink/80">{result.summary}</p>
-
-      {result.coreConcept && (
-        <div className="mt-4 rounded-lg border border-line bg-paper/50 p-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-ink/50">
-            Core concept
+    <div className="rounded-xl border border-card-border bg-card p-5">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Паспорт видео */}
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-yellow" />
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Паспорт видео
+            </h3>
+          </div>
+          <p className="mt-2 text-sm leading-relaxed text-foreground">
+            {summary || "Анализ не завершён."}
           </p>
-          <p className="mt-1 text-sm font-medium text-ink">{result.coreConcept}</p>
-        </div>
-      )}
-
-      {userFocus && (
-        <div className="mt-3 rounded-lg border border-accent/40 bg-accent/5 p-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-ink/50">
-            Your focus
-          </p>
-          <p className="mt-1 text-sm text-ink">{userFocus}</p>
-        </div>
-      )}
-
-      {topConcept && (
-        <div className="mt-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-ink/50">
-            Dominant concept
-          </p>
-          <div className="mt-2 flex items-center gap-3">
-            <div className="h-2 flex-1 overflow-hidden rounded-full bg-line">
-              <div
-                className="h-full bg-accent transition-all duration-500"
-                style={{ width: `${topConcept.score}%` }}
-              />
-            </div>
-            <span className="text-sm font-semibold text-ink">
-              {topConcept.score}%
-            </span>
-            <span className="text-sm text-ink">{topConcept.concept}</span>
+          {coreConcept && (
+            <p className="mt-2 text-xs text-muted">
+              Главная гипотеза:{" "}
+              <span className="text-foreground">{coreConcept}</span>
+            </p>
+          )}
+          <div className="mt-3">
+            <Badge
+              variant={isAlternative ? "accent" : "success"}
+              size="sm"
+              dot
+            >
+              {isAlternative ? "Альтернативный взгляд" : "Общепринятый консенсус"}
+            </Badge>
           </div>
         </div>
-      )}
-    </Card>
+
+        {/* Статус концепции */}
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-yellow" />
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Статус концепции
+            </h3>
+          </div>
+          <div className="mt-2 rounded-md border border-card-border bg-background/40 p-3">
+            <p className="text-xs text-muted">
+              Запрос пользователя:
+            </p>
+            <p className="mt-1 font-mono text-sm text-foreground">
+              {userFocus || "(не указан)"}
+            </p>
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-muted">Соответствие автора</span>
+              <span
+                className={`font-mono text-xs font-semibold ${
+                  isAlternative ? "text-brand-yellow" : "text-emerald-400"
+                }`}
+              >
+                {isAlternative ? "АЛТ" : "СТАНДАРТ"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              {isAlternative
+                ? "Автор высказывает нестандартную точку зрения, сопоставимую с существующими альтернативными гипотезами в этой области."
+                : "Автор следует общепринятым научным/индустриальным стандартам. Концепция подтверждается базой знаний."}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

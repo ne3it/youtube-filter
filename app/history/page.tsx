@@ -111,7 +111,16 @@ export default function HistoryPage() {
 
                 {expandedId === entry.id && (
                   <div className="mt-4 animate-fade-in">
-                    <SummaryCard result={entry.result} userFocus={entry.userFocus} />
+                    <SummaryCard
+                      userFocus={entry.userFocus}
+                      summary={entry.result.summary}
+                      coreConcept={entry.result.coreConcept}
+                      dominantPerspective={
+                        entry.result.theses.some((t) => t.confidence > 0.5)
+                          ? "alternative"
+                          : "consensus"
+                      }
+                    />
                   </div>
                 )}
               </li>
