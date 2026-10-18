@@ -406,6 +406,8 @@ export async function fetchTranscript(
   const fallbackEndpoints = [
     `https://youtubetranscript.com/?v=${videoId}&lang=${lang}`,
     `https://youtubetranscript.com/?v=${videoId}`,
+    `https://api.youtubetranscript.com/?v=${videoId}&lang=${lang}`,
+    `https://api.youtubetranscript.com/v2/?v=${videoId}&lang=${lang}`,
   ];
   for (const endpoint of fallbackEndpoints) {
     try {
@@ -413,13 +415,15 @@ export async function fetchTranscript(
         headers: {
           "User-Agent": "Mozilla/5.0 (compatible; YouTubeFilter/1.0)",
           "Referer": "https://www.youtube.com/",
+          "Accept": "application/json, text/plain, */*",
         },
       });
       if (!res.ok) continue;
       const text = await res.text();
+      console.warn("[fetchTranscript] fallback response:", text.slice(0, 200));
       const parsed = parseTranscriptResponse(text);
       if (parsed.length > 0) return parsed;
-    } catch {
+    } catch (err) {
       // continue
     }
   }
