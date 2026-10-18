@@ -5,7 +5,7 @@ import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
 import { useHistory } from "@/hooks/use-local-storage";
-import { extractVideoId } from "@/lib/youtube";
+import { extractVideoId, splitIntoChunks, fetchSubtitlesDirectly } from "@/lib/youtube";
 import type { HistoryEntry, LexicalStatsItem, TimelineDataItem } from "@/types";
 
 const PRESETS = [
@@ -72,17 +72,65 @@ export default function Home() {
     setActiveChunkId(null);
 
     try {
-      // 1. Получаем чанки субтитров через YouTube-Transcript.ai
+      const videoId = extractVideoId(url.trim());
+      if (!videoId) {
+        throw new Error("Неверный формат ссылки");
+      }
+
+      let chunks: Array<{
+        chunkId: number;
+        timestamp: string;
+        text: string;
+        startTime: number;
+        endTime: number;
+      }> = [];
+
+      // 1. Пробуем получить субтитры через Supadata API
       const transcriptRes = await fetch("/api/transcript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
-      if (!transcriptRes.ok) {
-        const err = await transcriptRes.json();
-        throw new Error(err.error || "Не удалось получить субтитры");
+
+      if (transcriptRes.ok) {
+        const transcriptData = await transcriptRes.json();
+        if (transcriptData.chunks) {
+          chunks = transcriptData.chunks;
+        } else if (transcriptData.requiresFrontendFallback) {
+          // Supadata квота исчерпана — фронтенд сам download через CORS-прокси
+          const subtitles = await fetchSubtitlesDirectly(videoId, "ru");
+          if (!subtitles || subtitles.length === 0) {
+            throw new Error("Субтитры не найдены");
+          }
+          const subtitlesWithDuration = subtitles.map((s) => ({
+            text: s.text,
+            start: s.start * 1000,
+            duration: 3000,
+          }));
+          chunks = splitIntoChunks(subtitlesWithDuration, 300);
+        }
+      } else {
+        // Ошибка от Supadata — фолбэк на фронтенд
+        const err = await transcriptRes.json().catch(() => ({}));
+        if (err.requiresFrontendFallback) {
+          const subtitles = await fetchSubtitlesDirectly(videoId, "ru");
+          if (!subtitles || subtitles.length === 0) {
+            throw new Error("Субтитры не найдены");
+          }
+          const subtitlesWithDuration = subtitles.map((s) => ({
+            text: s.text,
+            start: s.start * 1000,
+            duration: 3000,
+          }));
+          chunks = splitIntoChunks(subtitlesWithDuration, 300);
+        } else {
+          throw new Error(err.error || "Не удалось получить субтитры");
+        }
       }
-      const { videoId, chunks } = await transcriptRes.json();
+
+      if (chunks.length === 0) {
+        throw new Error("Субтитры не найдены");
+      }
 
       // 2. Отправляем чанки в ИИ
       const analyzeRes = await fetch("/api/analyze", {
