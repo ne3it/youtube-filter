@@ -5,6 +5,7 @@ import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
 import { useHistory } from "@/hooks/use-local-storage";
+import { extractVideoId, splitIntoChunks, fetchSubtitlesDirectly } from "@/lib/youtube";
 import type { HistoryEntry, LexicalStatsItem, TimelineDataItem } from "@/types";
 
 const PRESETS = [
@@ -31,8 +32,8 @@ export default function Home() {
 
   // Циклические сообщения лоадера
   const loaderMessages = [
-    "Скачиваем субтитры...",
-    "Фильтруем воду...",
+    "Скачиваем субтитры через CORS-прокси...",
+    "Фильтруем пустую воду...",
     "Сверяем тезисы с консенсусом через OpenRouter...",
   ];
 
@@ -71,24 +72,31 @@ export default function Home() {
     setActiveChunkId(null);
 
     try {
-      // 1. Получаем чанки субтитров через YouTube-Transcript.ai
-      const transcriptRes = await fetch("/api/transcript", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
-      });
-      if (!transcriptRes.ok) {
-        const err = await transcriptRes.json();
-        throw new Error(err.error || "Не удалось получить субтитры");
+      const videoId = extractVideoId(url.trim());
+      if (!videoId) {
+        throw new Error("Неверный формат ссылки");
       }
-      const { videoId, chunks } = await transcriptRes.json();
 
-      // 2. Отправляем чанки в ИИ
+      // 1. Фронтенд сам download субтитры через CORS-прокси (используем IP пользователя)
+      const subtitles = await fetchSubtitlesDirectly(videoId, "ru");
+      if (!subtitles || subtitles.length === 0) {
+        throw new Error("Субтитры не найдены");
+      }
+
+      // 2. Режем на 5-минутные чанки локально
+      const subtitlesWithDuration = subtitles.map((s) => ({
+        text: s.text,
+        start: s.start * 1000,
+        duration: 3000,
+      }));
+      const chunks = splitIntoChunks(subtitlesWithDuration, 300);
+
+      // 3. Отправляем только чанки в ИИ-анализ
       const analyzeRes = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chunks: chunks.map((c: any) => ({
+          chunks: chunks.map((c) => ({
             chunkId: c.chunkId,
             text: c.text,
             timestamp: c.timestamp,
@@ -106,7 +114,7 @@ export default function Home() {
 
       setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
 
-      // 3. Сохраняем в историю
+      // 4. Сохраняем в историю
       const entry: HistoryEntry = {
         id: `${videoId}-${Date.now()}`,
         videoId,
