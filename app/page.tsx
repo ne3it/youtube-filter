@@ -61,7 +61,7 @@ export default function Home() {
             segments: chunks.map((c: any) => ({
               text: c.text,
               start: c.startTime,
-              duration: c.endTime - c.startTime,
+              duration: Math.max(0, c.endTime - c.startTime),
             })),
             title: "",
             channel: "",

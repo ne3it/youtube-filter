@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { chunkTranscript } from "@/lib/youtube";
 import { analyzeWithAI, getProviderStatus } from "@/lib/ai";
-import type { TranscriptResult, AnalysisRequest } from "@/types";
+import type { TranscriptResult } from "@/types";
 
 export async function POST(req: Request) {
   try {
@@ -22,22 +23,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const reqBody: AnalysisRequest = {
+    const chunks = chunkTranscript(transcript.segments);
+
+    const result = await analyzeWithAI({
       videoId: transcript.videoId,
       title: transcript.title,
-      chunks: transcript.segments.map((s, i) => ({
-        chunkId: i,
-        text: s.text,
-        startTime: s.start,
-        endTime: s.start + s.duration,
-        timestamp: "",
-      })),
+      chunks,
       userFocus: userFocus || "general analysis",
-    };
+    });
 
-    const result = await analyzeWithAI(reqBody);
-
-    return NextResponse.json({ result }, { status: 200 });
+    return NextResponse.json({ result, chunks }, { status: 200 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });

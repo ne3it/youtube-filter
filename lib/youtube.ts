@@ -125,6 +125,58 @@ export function splitIntoChunks(
 }
 
 /**
+ * Разбивает субтитры на чанки по заданному размеру (в символах).
+ * Каждый чанк сохраняет временные метки start/end.
+ * Используется для отправки текста в ИИ-модель.
+ */
+export function chunkTranscript(
+  segments: TranscriptResult["segments"],
+  chunkSize = 1400,
+  overlap = 200
+): Chunk[] {
+  const chunks: Chunk[] = [];
+  let buffer = "";
+  let chunkStart = segments[0]?.start ?? 0;
+  let chunkEnd = segments[0]?.start ?? 0;
+  let index = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const candidate = buffer ? `${buffer} ${seg.text}` : seg.text;
+
+    if (candidate.length > chunkSize && buffer.length > 0) {
+      chunks.push({
+        id: `chunk-${index}`,
+        text: buffer.trim(),
+        start: chunkStart,
+        end: chunkEnd,
+        index,
+      });
+      index++;
+
+      const tail = buffer.slice(-overlap);
+      buffer = tail ? `${tail} ${seg.text}` : seg.text;
+      chunkStart = seg.start;
+    } else {
+      buffer = candidate;
+    }
+    chunkEnd = seg.start + seg.duration;
+  }
+
+  if (buffer.trim().length > 0) {
+    chunks.push({
+      id: `chunk-${index}`,
+      text: buffer.trim(),
+      start: chunkStart,
+      end: chunkEnd,
+      index,
+    });
+  }
+
+  return chunks;
+}
+
+/**
  * Превращает сырые субтитры из youtube-transcript формата
  * в наш внутренний TranscriptResult.
  */

@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Moon, Sun, Github } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Moon, Sun } from "lucide-react";
 
 export function Header() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -35,26 +34,27 @@ export function Header() {
             YouTube Concept Filter
           </span>
         </div>
-        <nav className="flex items-center gap-1">
-          <Button
-            asChild
-            variant="ghost"
-            size="sm"
-            className="hidden sm:inline-flex"
-          >
-            <a href="/">Analyze</a>
-          </Button>
-          <Button asChild variant="ghost" size="sm">
-            <a href="/history">History</a>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
+<nav className="flex items-center gap-1">
+            <a
+              href="/"
+              className="hidden sm:inline-flex items-center justify-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-sm text-ink hover:bg-paper/60 transition-colors"
+            >
+              Analyze
+            </a>
+            <a
+              href="/history"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-transparent px-3 py-1.5 text-sm text-ink hover:bg-paper/60 transition-colors"
+            >
+              History
+            </a>
+          <button
+            type="button"
             aria-label="Toggle theme"
             onClick={toggleTheme}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-transparent text-ink hover:bg-paper/60 transition-colors"
           >
             {theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-          </Button>
+          </button>
         </nav>
       </div>
     </header>
