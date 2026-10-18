@@ -7,7 +7,14 @@ Deliver an objective, intermediate opinion — no toxicity, no subjective "good/
 If the author presents an alternative or non-standard viewpoint, do NOT label it as fake science or misinformation.
 Correctly mark it as "alternative" and briefly compare it with the prevailing consensus in this domain.
 Completely ignore filler, fluff, and ad integrations unrelated to the topic.
-Respond ONLY with a single valid JSON object, no markdown, no prose outside JSON.`;
+
+Respond ONLY with a JSON object with EXACTLY these four keys:
+- "summary": 1-2 sentences capturing the essence of this fragment.
+- "perspective": either "consensus" for standard view or "alternative" for non-standard view.
+- "analysis": concise, neutral AI intermediate opinion, cross-referenced with known knowledge base.
+- "score": integer 0-100. 0 = pure ad/filler, 100 = pure scientific/practical concentrate.
+
+No other keys. No markdown. No prose outside JSON.`;
 
 /**
  * Отправляет один чанк текста в OpenRouter API.
