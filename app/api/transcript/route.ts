@@ -18,11 +18,12 @@ export async function POST(request: Request) {
     let subtitles: Array<{ text: string; start: number; duration: number }>;
     try {
       subtitles = await fetchTranscript(videoId, "ru");
-    } catch {
+    } catch (err) {
+      console.warn("[transcript] ru failed:", err instanceof Error ? err.message : err);
       try {
         subtitles = await fetchTranscript(videoId, "en");
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "unknown";
+      } catch (err2) {
+        const message = err2 instanceof Error ? err2.message : "unknown";
         return NextResponse.json(
           { error: `Субтитры недоступны для этого видео: ${message}` },
           { status: 404 }

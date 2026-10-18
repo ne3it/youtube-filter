@@ -219,21 +219,27 @@ function decodeHtml(s: string): string {
  * Ищет window["ytInitialPlayerResponse"] = {...};
  */
 function extractCaptionTracks(html: string): any[] {
+  // Пробуем несколько паттернов для разных форматов страницы YouTube
   const patterns = [
     /window\["ytInitialPlayerResponse"\]\s*=\s*(\{[\s\S]*?\});/,
     /var\s+ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\});/,
     /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;/,
+    /window\.ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})/,
+    /"ytInitialPlayerResponse"\s*:\s*(\{[\s\S]*?\})/,
   ];
 
   for (const pattern of patterns) {
     const match = html.match(pattern);
     if (match) {
       try {
-        const parsed = JSON.parse(match[1]);
+        // Очищаем от лишних escape-символов и парсим
+        let jsonStr = match[1].replace(/\\x([0-9a-fA-F]{2})/g, "").replace(/\\u0026/g, "&");
+        const parsed = JSON.parse(jsonStr);
         const tracks = parsed?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
         if (Array.isArray(tracks) && tracks.length > 0) return tracks;
-      } catch {
-        // continue
+      } catch (err) {
+        // Пробуем следующий паттерн
+        continue;
       }
     }
   }
@@ -255,25 +261,52 @@ function extractCaptionTracks(html: string): any[] {
 /**
  * Парсит XML-субтитры YouTube (формат timedtext).
  * Поддерживает srv3 (<p t="ms" d="s">) и классический (<text start="s" dur="s">).
+ * Использует гибкий разбор атрибутов, независимый от порядка.
  */
 function parseTranscriptXml(xml: string): Array<{ text: string; start: number; duration: number }> {
   const result: Array<{ text: string; start: number; duration: number }> = [];
 
-  // srv3-формат: <p t="1234" d="5.6">Текст</p>
-  const srv3 = xml.matchAll(/<p\s+t="(\d+)"\s+d="([\d.]+)"[^>]*>([^<]*)<\/p>/g);
-  for (const m of srv3) {
-    const text = decodeHtml(m[3]).trim();
+  // YouTube использует два формата:
+  // 1. srv3: <p t="1234" d="5.6">Текст</p>  (t=ms, d=s)
+  // 2. Классический: <text start="1.5" dur="3.0">Текст</text> (start=s, dur=s)
+
+  // Общий regex для <p> с любыми атрибутами и многострочным текстом
+  const pMatches = xml.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g);
+  for (const m of pMatches) {
+    const attrs = m[1];
+    const text = decodeHtml(m[2]).trim();
     if (!text) continue;
-    result.push({ text, start: Number(m[1]), duration: Number(m[2]) * 1000 });
+
+    const tMatch = attrs.match(/\bt="([\d.]+)"/);
+    const dMatch = attrs.match(/\bd="([\d.]+)"/);
+
+    if (tMatch && dMatch) {
+      result.push({
+        text,
+        start: Number(tMatch[1]),
+        duration: Number(dMatch[1]) * 1000,
+      });
+    }
   }
   if (result.length > 0) return result;
 
-  // Классический формат: <text start="1.5" dur="3.0">Текст</text>
-  const classic = xml.matchAll(/<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([^<]*)<\/text>/g);
-  for (const m of classic) {
-    const text = decodeHtml(m[3]).trim();
+  // Общий regex для <text> с любыми атрибутами
+  const textMatches = xml.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/g);
+  for (const m of textMatches) {
+    const attrs = m[1];
+    const text = decodeHtml(m[2]).trim();
     if (!text) continue;
-    result.push({ text, start: Number(m[1]) * 1000, duration: Number(m[2]) * 1000 });
+
+    const startMatch = attrs.match(/\bstart="([\d.]+)"/);
+    const durMatch = attrs.match(/\bdur="([\d.]+)"/);
+
+    if (startMatch && durMatch) {
+      result.push({
+        text,
+        start: Number(startMatch[1]) * 1000,
+        duration: Number(durMatch[1]) * 1000,
+      });
+    }
   }
 
   return result;
