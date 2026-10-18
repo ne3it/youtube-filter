@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { SummaryCard } from "@/components/dashboard/summary-card";
+import { useState, useEffect, useRef } from "react";
 import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
@@ -18,38 +17,37 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [focus, setFocus] = useState("");
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lexicalStats, setLexicalStats] = useState<LexicalStatsItem[]>([]);
-  const [timelineData, setTimelineData] = useState<TimelineDataItem[]>([]);
-  const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<{
+    lexicalStats: LexicalStatsItem[];
+    timelineData: TimelineDataItem[];
+  } | null>(null);
   const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
-const [summary, setSummary] = useState("");
-  const [coreConcept, setCoreConcept] = useState("");
-  const [dominantPerspective, setDominantPerspective] = useState<"consensus" | "alternative">("consensus");
   const [manualText, setManualText] = useState("");
   const [showManualInput, setShowManualInput] = useState(false);
   const [loaderStep, setLoaderStep] = useState(0);
+  const thesisListRef = useRef<HTMLDivElement>(null);
 
   const { entries: history, addEntry, isHydrated } = useHistory();
 
   // Циклические сообщения лоадера
   const loaderMessages = [
-    "Скачиваем автоматические субтитры...",
-    "Фильтруем пустую воду...",
-    "Сверяем тезисы автора с научным консенсусом...",
+    "Скачиваем субтитры...",
+    "Фильтруем воду...",
+    "Сверяем тезисы с консенсусом через OpenRouter...",
   ];
 
   useEffect(() => {
-    if (!loading) return;
+    if (!isLoading) return;
     setLoaderStep(0);
     const interval = setInterval(() => {
       setLoaderStep((prev) => (prev + 1) % loaderMessages.length);
     }, 2000);
     return () => clearInterval(interval);
-  }, [loading]);
+  }, [isLoading]);
 
-  const timelineSegments = timelineData.map((t) => ({
+  const timelineSegments = (analysisResult?.timelineData ?? []).map((t) => ({
     time: t.timestamp,
     type: t.perspective === "alternative" ? ("alternative" as const) : ("consensus" as const),
     score: t.score,
@@ -69,14 +67,10 @@ const [summary, setSummary] = useState("");
       setError("Введите ссылку на YouTube видео");
       return;
     }
-    setLoading(true);
+    setIsLoading(true);
     setError(null);
-    setLexicalStats([]);
-    setTimelineData([]);
-    setSelectedWord(null);
+    setAnalysisResult(null);
     setActiveChunkId(null);
-    setSummary("");
-    setCoreConcept("");
 
     try {
       // 1. Получаем чанки субтитров
@@ -91,7 +85,7 @@ const [summary, setSummary] = useState("");
       if (transcriptData.requiresManualInput) {
         setShowManualInput(true);
         setError("YouTube ограничил автоматический доступ. Вставьте текст субтитров вручную.");
-        setLoading(false);
+        setIsLoading(false);
         return;
       }
 
@@ -120,21 +114,8 @@ const [summary, setSummary] = useState("");
       const data = await analyzeRes.json();
       const stats = data.lexicalStats || [];
       const timeline = data.timelineData || [];
-      setLexicalStats(stats);
-      setTimelineData(timeline);
 
-      // Агрегируем summary из первых чанков
-      const aggregatedSummary = timeline
-        .map((t: TimelineDataItem) => t.summary)
-        .filter(Boolean)
-        .slice(0, 2)
-        .join(" ");
-      setSummary(aggregatedSummary || "Анализ завершён.");
-
-      // Определяем доминантную позицию
-      const altCount = timeline.filter((t: TimelineDataItem) => t.perspective === "alternative").length;
-      const consensusCount = timeline.filter((t: TimelineDataItem) => t.perspective === "consensus").length;
-      setDominantPerspective(altCount > consensusCount ? "alternative" : "consensus");
+      setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
 
       // 3. Сохраняем в историю
       const entry: HistoryEntry = {
@@ -148,7 +129,7 @@ const [summary, setSummary] = useState("");
           videoId,
           title: `YouTube video ${videoId}`,
           channel: "Unknown channel",
-          summary: aggregatedSummary,
+          summary: timeline.map((t: TimelineDataItem) => t.summary).filter(Boolean).slice(0, 2).join(" ") || "Анализ завершён.",
           conceptScores: [],
           semanticTimeline: [],
           wordCloud: stats.map((l: LexicalStatsItem) => ({
@@ -172,7 +153,7 @@ const [summary, setSummary] = useState("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -181,14 +162,10 @@ const [summary, setSummary] = useState("");
       setError("Введите текст субтитров");
       return;
     }
-    setLoading(true);
+    setIsLoading(true);
     setError(null);
-    setLexicalStats([]);
-    setTimelineData([]);
-    setSelectedWord(null);
+    setAnalysisResult(null);
     setActiveChunkId(null);
-    setSummary("");
-    setCoreConcept("");
 
     try {
       const transcriptRes = await fetch("/api/transcript", {
@@ -221,24 +198,41 @@ const [summary, setSummary] = useState("");
       const data = await analyzeRes.json();
       const stats = data.lexicalStats || [];
       const timeline = data.timelineData || [];
-      setLexicalStats(stats);
-      setTimelineData(timeline);
-
-      const aggregatedSummary = timeline
-        .map((t: TimelineDataItem) => t.summary)
-        .filter(Boolean)
-        .slice(0, 2)
-        .join(" ");
-      setSummary(aggregatedSummary || "Анализ завершён.");
-
-      const altCount = timeline.filter((t: TimelineDataItem) => t.perspective === "alternative").length;
-      const consensusCount = timeline.filter((t: TimelineDataItem) => t.perspective === "consensus").length;
-      setDominantPerspective(altCount > consensusCount ? "alternative" : "consensus");
+      setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
+  };
+
+  // При клике на сегмент — плавный скролл к карточке
+  const handleSegmentClick = (index: number) => {
+    setActiveChunkId(index);
+    setTimeout(() => {
+      const el = document.getElementById(`thesis-chunk-${index}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 100);
+  };
+
+  // Клик по истории — мгновенная загрузка без повторных запросов
+  const handleHistoryClick = (entry: HistoryEntry) => {
+    const stats: LexicalStatsItem[] = entry.result.wordCloud.map((w) => ({
+      text: w.word,
+      value: Math.round(w.weight * 100),
+    }));
+    const timeline: TimelineDataItem[] = entry.result.theses.map((t, i) => ({
+      chunkId: i,
+      timestamp: "00:00 - 05:00",
+      summary: t.claim,
+      perspective: "consensus" as const,
+      analysis: t.support,
+      score: Math.round(t.confidence * 100),
+    }));
+    setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
+    setActiveChunkId(null);
   };
 
   return (
@@ -253,7 +247,7 @@ const [summary, setSummary] = useState("");
           </p>
 
           {/* Форма */}
-          {loading ? (
+          {isLoading ? (
             <div className="rounded-md border border-card-border bg-black/40 p-6 font-mono text-sm">
               <div className="flex items-center gap-2 text-brand-yellow">
                 <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-yellow" />
@@ -261,8 +255,8 @@ const [summary, setSummary] = useState("");
               </div>
               <div className="mt-3 space-y-1 text-muted">
                 <p>{"> "}{loaderMessages[loaderStep]}</p>
-                <p>{"> "}{loaderStep >= 1 ? "Фильтруем пустую воду..." : "Ожидание..."}</p>
-                <p>{"> "}{loaderStep >= 2 ? "Сверяем тезисы..." : "Ожидание..."}</p>
+                <p>{"> "}{loaderStep >= 1 ? "Фильтруем воду..." : "Ожидание..."}</p>
+                <p>{"> "}{loaderStep >= 2 ? "Сверяем тезисы с консенсусом через OpenRouter..." : "Ожидание..."}</p>
               </div>
               <div className="mt-4 h-1 w-full overflow-hidden rounded bg-card-border">
                 <div
@@ -279,7 +273,7 @@ const [summary, setSummary] = useState("");
                 placeholder="Вставьте ссылку на YouTube видео..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                disabled={loading}
+                disabled={isLoading}
                 className="w-full rounded-none border border-card-border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200 disabled:opacity-50"
               />
             </div>
@@ -295,7 +289,7 @@ const [summary, setSummary] = useState("");
                     <button
                       key={preset.id}
                       type="button"
-                      disabled={loading}
+                      disabled={isLoading}
                       onClick={() => handlePresetClick(preset.id)}
                       className={`rounded-none border px-3 py-1.5 text-sm transition-all duration-150 disabled:opacity-50 ${
                         isActive
@@ -316,7 +310,7 @@ const [summary, setSummary] = useState("");
                 placeholder="Или укажите свой фокус (например: проверь теорию Х)..."
                 value={focus}
                 onChange={(e) => setFocus(e.target.value)}
-                disabled={loading}
+                disabled={isLoading}
                 className="w-full rounded-none border border-card-border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200 disabled:opacity-50"
               />
             </div>
@@ -324,7 +318,7 @@ const [summary, setSummary] = useState("");
             <div className="pt-2">
               <button
                 type="button"
-                disabled={loading}
+                disabled={isLoading}
                 onClick={handleAnalyze}
                 className="group w-full rounded-none bg-brand-yellow px-4 py-3 text-base font-semibold text-ink transition-all duration-150 hover:bg-[#FFD200] hover:shadow-neon-yellow active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -337,8 +331,7 @@ const [summary, setSummary] = useState("");
                 {error}
               </div>
             )}
-
-            {/* Ручной ввод субтитров */}
+{/* Ручной ввод субтитров */}
             {showManualInput && (
               <div className="mt-3 space-y-3">
                 <textarea
@@ -346,12 +339,13 @@ const [summary, setSummary] = useState("");
                   value={manualText}
                   onChange={(e) => setManualText(e.target.value)}
                   rows={6}
-                  className="w-full resize-y rounded-none border border-card-border bg-black/40 p-3 font-mono text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200"
+                  disabled={isLoading}
+                  className="w-full resize-y rounded-none border border-card-border bg-black/40 p-3 font-mono text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200 disabled:opacity-50"
                 />
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    disabled={loading}
+                    disabled={isLoading}
                     onClick={handleManualSubmit}
                     className="flex-1 rounded-none bg-brand-yellow px-4 py-2 text-sm font-semibold text-ink transition-all duration-150 hover:bg-[#FFD200] hover:shadow-neon-yellow disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -359,13 +353,13 @@ const [summary, setSummary] = useState("");
                   </button>
                   <button
                     type="button"
-                    disabled={loading}
+                    disabled={isLoading}
                     onClick={() => {
                       setShowManualInput(false);
                       setManualText("");
                       setError(null);
                     }}
-                    className="rounded-none border border-card-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-card"
+                    className="rounded-none border border-card-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-card disabled:opacity-50"
                   >
                     Отмена
                   </button>
@@ -374,38 +368,34 @@ const [summary, setSummary] = useState("");
             )}
           </div>
           )}
+
         </div>
 
         {/* Результаты анализа */}
-        {timelineData.length > 0 && (
+        {analysisResult && (
           <div className="mt-12 w-full max-w-4xl space-y-6 animate-fade-in">
-            <SummaryCard
-              userFocus={focus}
-              summary={summary}
-              coreConcept={coreConcept}
-              dominantPerspective={dominantPerspective}
-            />
-
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <TimelineChart
                   data={timelineSegments}
-                  onSegmentClick={setActiveChunkId}
+                  onSegmentClick={handleSegmentClick}
                 />
               </div>
               <div>
                 <WordCloud
-                  words={lexicalStats}
-                  onTagClick={setSelectedWord}
+                  words={analysisResult.lexicalStats}
+                  onTagClick={() => {}}
                 />
               </div>
             </div>
 
-            <ThesisList
-              items={timelineData}
-              activeChunkId={activeChunkId}
-              onChunkClick={setActiveChunkId}
-            />
+            <div ref={thesisListRef}>
+              <ThesisList
+                items={analysisResult.timelineData}
+                activeChunkId={activeChunkId}
+                onChunkClick={setActiveChunkId}
+              />
+            </div>
           </div>
         )}
 
@@ -420,25 +410,7 @@ const [summary, setSummary] = useState("");
                 <button
                   key={entry.id}
                   type="button"
-                  onClick={() => {
-                    setLexicalStats(
-                      entry.result.wordCloud.map((w) => ({
-                        text: w.word,
-                        value: Math.round(w.weight * 100),
-                      }))
-                    );
-                    setTimelineData(entry.result.theses.map((t, i) => ({
-                      chunkId: i,
-                      timestamp: "00:00 - 05:00",
-                      summary: t.claim,
-                      perspective: "consensus" as const,
-                      analysis: t.support,
-                      score: Math.round(t.confidence * 100),
-                    })));
-                    setSummary(entry.result.summary);
-                    setCoreConcept(entry.result.coreConcept);
-                    setActiveChunkId(null);
-                  }}
+                  onClick={() => handleHistoryClick(entry)}
                   className="w-full rounded-lg border border-card-border bg-card p-3 text-left transition-colors hover:border-brand-yellow"
                 >
                   <div className="flex items-center justify-between">
