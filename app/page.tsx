@@ -1,170 +1,109 @@
 "use client";
 
 import { useState } from "react";
-import { Header } from "@/components/shared/header";
-import { Footer } from "@/components/shared/footer";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { SummaryCard } from "@/components/dashboard/summary-card";
-import { TimelineChart } from "@/components/dashboard/timeline-chart";
-import { WordCloud } from "@/components/dashboard/word-cloud";
-import { ThesisList } from "@/components/dashboard/thesis-list";
-import { useHistory } from "@/hooks/use-local-storage";
-import { extractVideoId, isValidYouTubeUrl } from "@/lib/youtube";
-import type { AnalysisResult, HistoryEntry, TranscriptResult } from "@/types";
 
-export default function Page() {
+const PRESETS = [
+  { id: "academic", label: "Академический" },
+  { id: "it", label: "Практический (IT)" },
+  { id: "pop", label: "Поп-наука" },
+] as const;
+
+export default function Home() {
   const [url, setUrl] = useState("");
   const [focus, setFocus] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [transcript, setTranscript] = useState<TranscriptResult | null>(null);
-  const { addEntry } = useHistory();
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
-  const isValid = isValidYouTubeUrl(url);
+  const handlePresetClick = (presetId: string) => {
+    const preset = PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    const next = selectedPreset === presetId ? null : presetId;
+    setSelectedPreset(next);
+    setFocus(next ? preset.label : "");
+  };
 
-  const handleAnalyze = async () => {
-    if (!isValid) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setTranscript(null);
-
-    try {
-      const videoId = extractVideoId(url)!;
-
-      const transcriptRes = await fetch(`/api/transcript?url=${encodeURIComponent(url)}`);
-      if (!transcriptRes.ok) {
-        const err = await transcriptRes.json();
-        throw new Error(err.error || "Failed to fetch transcript");
-      }
-      const transcriptData: TranscriptResult = await transcriptRes.json();
-      setTranscript(transcriptData);
-
-      const analyzeRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: transcriptData, userFocus: focus }),
-      });
-      if (!analyzeRes.ok) {
-        const err = await analyzeRes.json();
-        throw new Error(err.error || "Analysis failed");
-      }
-      const analyzeData = await analyzeRes.json();
-      const analysisResult: AnalysisResult = analyzeData.result;
-      setResult(analysisResult);
-
-      const entry: HistoryEntry = {
-        id: `${videoId}-${Date.now()}`,
-        videoId,
-        url,
-        title: analysisResult.title,
-        channel: analysisResult.channel,
-        userFocus: focus,
-        result: analysisResult,
-        createdAt: Date.now(),
-      };
-      addEntry(entry);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
+  const handleAnalyze = () => {
+    alert(`URL: ${url || "(не указана)"}\nФокус: ${focus || "(по умолчанию)"}`);
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header />
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <main className="flex flex-1 flex-col items-center justify-center px-4 py-16 sm:py-24">
+        <div className="w-full max-w-2xl text-center">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Препарируйте смыслы YouTube
+          </h1>
+          <p className="mt-3 text-base text-muted">
+            Умное самообразование без инфомусора
+          </p>
 
-      <main className="flex-1 mx-auto w-full max-w-content px-4 sm:px-6 py-8">
-        {/* Hero / input */}
-        <section className="mx-auto max-w-2xl">
-          <div className="text-center">
-            <Badge variant="accent" size="sm" className="mb-4">
-              AI anatomical concept filter
-            </Badge>
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-ink">
-              Extract the conceptual skeleton of any YouTube video
-            </h1>
-            <p className="mt-3 text-base text-ink/60">
-              Paste a link, optionally add a focus, and let the free LLM API
-              map the video into concepts, timeline, and alternative theses.
+          {/* Форма */}
+          <div className="mt-10 space-y-6 text-left">
+            <div>
+              <input
+                type="url"
+                placeholder="Вставьте ссылку на YouTube видео..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="w-full rounded-none border border-card-border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200"
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+                Направление анализа
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {PRESETS.map((preset) => {
+                  const isActive = selectedPreset === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => handlePresetClick(preset.id)}
+                      className={`rounded-none border px-3 py-1.5 text-sm transition-all duration-150 ${
+                        isActive
+                          ? "border-brand-yellow bg-brand-yellow text-ink shadow-neon-yellow"
+                          : "border-card-border bg-card text-foreground hover:border-brand-yellow/60"
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <input
+                type="text"
+                placeholder="Или укажите свой фокус (например: проверь теорию Х)..."
+                value={focus}
+                onChange={(e) => setFocus(e.target.value)}
+                className="w-full rounded-none border border-card-border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200"
+              />
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleAnalyze}
+                className="group w-full rounded-none bg-brand-yellow px-4 py-3 text-base font-semibold text-ink transition-all duration-150 hover:bg-[#FFD200] hover:shadow-neon-yellow active:scale-[0.99]"
+              >
+                Запустить анализ
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Место под историю проверок */}
+        <div className="mt-16 w-full max-w-2xl">
+          <div className="rounded-none border border-dashed border-card-border bg-card/40 p-6">
+            <p className="text-center text-sm text-muted">
+              История проверок (подключим LocalStorage позже)
             </p>
           </div>
-
-          <div className="mt-8 space-y-3">
-            <Input
-              type="url"
-              placeholder="https://www.youtube.com/watch?v=..."
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="h-12 text-base"
-            />
-            <Input
-              type="text"
-              placeholder="Custom focus (optional) — e.g. 'political framing'"
-              value={focus}
-              onChange={(e) => setFocus(e.target.value)}
-              className="h-11"
-            />
-            <div className="flex items-center gap-3">
-              <Button
-                variant="accent"
-                size="lg"
-                className="flex-1"
-                onClick={handleAnalyze}
-                disabled={!isValid || loading}
-              >
-                {loading ? "Analyzing..." : "Analyze video"}
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                onClick={() => {
-                  setUrl("");
-                  setFocus("");
-                  setResult(null);
-                  setTranscript(null);
-                  setError(null);
-                }}
-                disabled={loading}
-              >
-                Clear
-              </Button>
-            </div>
-            {!isValid && url.length > 0 && (
-              <p className="text-xs text-red-600">Please enter a valid YouTube URL.</p>
-            )}
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Results */}
-        {result && (
-          <section className="mt-10 animate-fade-in">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-              <div className="lg:col-span-2">
-                <SummaryCard result={result} userFocus={focus} />
-              </div>
-              <div>
-                <WordCloud words={result.wordCloud} />
-              </div>
-            </div>
-            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <TimelineChart points={result.semanticTimeline} />
-              <ThesisList theses={result.theses} />
-            </div>
-          </section>
-        )}
+        </div>
       </main>
-
-      <Footer />
     </div>
   );
 }

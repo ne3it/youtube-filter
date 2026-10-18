@@ -2,12 +2,27 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: [
-    "./app/**/*.{ts,tsx}",
-    "./components/**/*.{ts,tsx}",
+    "./app/**/*.{ts,tsx,css}",
+    "./components/**/*.{ts,tsx,css}",
+    "./app/**/*.css",
+    "./components/**/*.css",
   ],
   theme: {
     extend: {
       colors: {
+        // Кастомный бренд-цвет (яркий акцент)
+        "brand-yellow": "#FFC700",
+        // Системные цвета, привязанные к CSS-переменам (светлая/тёмная тема)
+        background: "var(--background)",
+        foreground: "var(--foreground)",
+        card: {
+          DEFAULT: "var(--card-bg)",
+          border: "var(--card-border)",
+        },
+        muted: {
+          DEFAULT: "var(--text-muted)",
+        },
+        // Сохраняем обратную совместимость с существующими компонентами
         ink: {
           DEFAULT: "#0a0a0a",
           soft: "#141414",
@@ -26,6 +41,9 @@ const config: Config = {
           DEFAULT: "#e5e3da",
           soft: "#f0ede4",
         },
+      },
+      boxShadow: {
+        "neon-yellow": "0 0 15px rgba(255, 199, 0, 0.3)",
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
