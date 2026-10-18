@@ -337,36 +337,60 @@ export async function fetchTranscript(
   videoId: string,
   lang: string = "en"
 ): Promise<Array<{ text: string; start: number; duration: number }> | { requiresManualInput: true }> {
-  // 1. Грузим страницу видео с полной имитацией браузера
-  const pageUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const pageRes = await fetch(pageUrl, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Referer": "https://www.youtube.com/",
-      "Origin": "https://www.youtube.com",
-      "Sec-Ch-Ua": '"Chromium";v="120", "Not(A:="";v="24"',
-      "Sec-Ch-Ua-Mobile": "?0",
-      "Sec-Ch-Ua-Platform": '"Windows"',
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "same-origin",
-      "Sec-Fetch-User": "?1",
-      "Upgrade-Insecure-Requests": "1",
-    },
-  });
+  // 1. Пробуем прямой YouTube scraping с разными URL-вариантами
+  const pageVariants = [
+    `https://www.youtube.com/watch?v=${videoId}`,
+    `https://m.youtube.com/watch?v=${videoId}`,
+    `https://www.youtube.com/embed/${videoId}`,
+    `https://www.youtube.com/shorts/${videoId}`,
+  ];
 
-  if (!pageRes.ok) {
-    return { requiresManualInput: true };
+  let tracks: any[] = [];
+  let html = "";
+
+  for (const pageUrl of pageVariants) {
+    try {
+      const pageRes = await fetch(pageUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Referer": "https://www.youtube.com/",
+          "Origin": "https://www.youtube.com",
+          "Sec-Ch-Ua": '"Chromium";v="120", "Not(A:="";v="24"',
+          "Sec-Ch-Ua-Mobile": "?0",
+          "Sec-Ch-Ua-Platform": '"Windows"',
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "same-origin",
+          "Sec-Fetch-User": "?1",
+          "Upgrade-Insecure-Requests": "1",
+        },
+      });
+
+      if (!pageRes.ok) {
+        console.warn(`[fetchTranscript] ${pageUrl} -> HTTP ${pageRes.status}`);
+        continue;
+      }
+
+      html = await pageRes.text();
+      console.log(`[fetchTranscript] ${pageUrl} -> HTML length: ${html.length}`);
+      tracks = extractCaptionTracks(html);
+      if (tracks.length > 0) {
+        console.log(`[fetchTranscript] Found ${tracks.length} tracks from ${pageUrl}`);
+        break;
+      }
+    } catch (err) {
+      console.warn(`[fetchTranscript] ${pageUrl} failed:`, err);
+    }
   }
-
-  const html = await pageRes.text();
-  const tracks = extractCaptionTracks(html);
 
   if (tracks.length === 0) {
+    console.error("[fetchTranscript] No caption tracks found in any page variant");
     return { requiresManualInput: true };
   }
+
+  console.log("[fetchTranscript] Tracks:", tracks.length, "first:", JSON.stringify(tracks[0]).slice(0, 300));
 
   // 2. Выбираем нужный трек (приоритет: указанный язык, иначе первый доступный)
   const track = tracks.find((t: any) => t.languageCode === lang) || tracks[0];
@@ -412,25 +436,28 @@ export async function fetchTranscript(
     }
   }
 
-  // Fallback: публичный прокси youtubetranscript.com
-  const fallbackEndpoints = [
-    `https://youtubetranscript.com/?v=${videoId}&lang=${lang}`,
-    `https://youtubetranscript.com/?v=${videoId}`,
+  // Fallback: публичные CORS-прокси для обхода YouTube bot detection
+  const proxyEndpoints = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
+    `https://corsproxy.io/?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
+    `https://api.codetabs.com/v1/proxy?quest=https://www.youtube.com/watch?v=${videoId}`,
   ];
-  for (const endpoint of fallbackEndpoints) {
+
+  for (const proxyUrl of proxyEndpoints) {
     try {
-      const res = await fetch(endpoint, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; YouTubeFilter/1.0)",
-          "Referer": "https://www.youtube.com/",
-        },
+      const proxyRes = await fetch(proxyUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
       });
-      if (!res.ok) continue;
-      const text = await res.text();
-      const parsed = parseTranscriptResponse(text);
-      if (parsed.length > 0) return parsed;
-    } catch {
-      // continue
+      if (!proxyRes.ok) continue;
+      const proxyHtml = await proxyRes.text();
+      const proxyTracks = extractCaptionTracks(proxyHtml);
+      if (proxyTracks.length > 0) {
+        console.log(`[fetchTranscript] Found ${proxyTracks.length} tracks via proxy`);
+        tracks = proxyTracks;
+        break;
+      }
+    } catch (err) {
+      console.warn(`[fetchTranscript] Proxy failed:`, err);
     }
   }
 

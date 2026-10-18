@@ -24,8 +24,6 @@ export default function Home() {
     timelineData: TimelineDataItem[];
   } | null>(null);
   const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
-  const [manualText, setManualText] = useState("");
-  const [showManualInput, setShowManualInput] = useState(false);
   const [loaderStep, setLoaderStep] = useState(0);
   const thesisListRef = useRef<HTMLDivElement>(null);
 
@@ -73,26 +71,17 @@ export default function Home() {
     setActiveChunkId(null);
 
     try {
-      // 1. Получаем чанки субтитров
+      // 1. Получаем чанки субтитров через YouTube-Transcript.ai
       const transcriptRes = await fetch("/api/transcript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
-      const transcriptData = await transcriptRes.json();
-
-      // Проверяем, требуется ли ручной ввод
-      if (transcriptData.requiresManualInput) {
-        setShowManualInput(true);
-        setError("YouTube ограничил автоматический доступ. Вставьте текст субтитров вручную.");
-        setIsLoading(false);
-        return;
-      }
-
       if (!transcriptRes.ok) {
-        throw new Error(transcriptData.error || "Не удалось получить субтитры");
+        const err = await transcriptRes.json();
+        throw new Error(err.error || "Не удалось получить субтитры");
       }
-      const { videoId, chunks } = transcriptData;
+      const { videoId, chunks } = await transcriptRes.json();
 
       // 2. Отправляем чанки в ИИ
       const analyzeRes = await fetch("/api/analyze", {
@@ -150,55 +139,6 @@ export default function Home() {
         createdAt: Date.now(),
       };
       addEntry(entry);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Произошла ошибка");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleManualSubmit = async () => {
-    if (!manualText.trim()) {
-      setError("Введите текст субтитров");
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-    setAnalysisResult(null);
-    setActiveChunkId(null);
-
-    try {
-      const transcriptRes = await fetch("/api/transcript", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim(), manualText: manualText.trim() }),
-      });
-      if (!transcriptRes.ok) {
-        const err = await transcriptRes.json();
-        throw new Error(err.error || "Не удалось обработать текст");
-      }
-      const { videoId, chunks } = await transcriptRes.json();
-
-      const analyzeRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chunks: chunks.map((c: any) => ({
-            chunkId: c.chunkId,
-            text: c.text,
-            timestamp: c.timestamp,
-          })),
-          userFocus: focus,
-        }),
-      });
-      if (!analyzeRes.ok) {
-        const err = await analyzeRes.json();
-        throw new Error(err.error || "Анализ не удался");
-      }
-      const data = await analyzeRes.json();
-      const stats = data.lexicalStats || [];
-      const timeline = data.timelineData || [];
-      setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
@@ -329,41 +269,6 @@ export default function Home() {
             {error && (
               <div className="rounded-none border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-400">
                 {error}
-              </div>
-            )}
-{/* Ручной ввод субтитров */}
-            {showManualInput && (
-              <div className="mt-3 space-y-3">
-                <textarea
-                  placeholder="Вставьте текст субтитров вручную (каждая строка — фрагмент)..."
-                  value={manualText}
-                  onChange={(e) => setManualText(e.target.value)}
-                  rows={6}
-                  disabled={isLoading}
-                  className="w-full resize-y rounded-none border border-card-border bg-black/40 p-3 font-mono text-sm text-foreground placeholder:text-muted focus:border-brand-yellow focus:shadow-neon-yellow focus:outline-none focus:ring-1 focus:ring-brand-yellow transition-all duration-200 disabled:opacity-50"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={isLoading}
-                    onClick={handleManualSubmit}
-                    className="flex-1 rounded-none bg-brand-yellow px-4 py-2 text-sm font-semibold text-ink transition-all duration-150 hover:bg-[#FFD200] hover:shadow-neon-yellow disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Анализировать текст
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isLoading}
-                    onClick={() => {
-                      setShowManualInput(false);
-                      setManualText("");
-                      setError(null);
-                    }}
-                    className="rounded-none border border-card-border px-4 py-2 text-sm text-foreground transition-colors hover:bg-card disabled:opacity-50"
-                  >
-                    Отмена
-                  </button>
-                </div>
               </div>
             )}
           </div>
