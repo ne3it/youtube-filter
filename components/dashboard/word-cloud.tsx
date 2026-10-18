@@ -1,86 +1,60 @@
-import { useMemo } from "react";
-import type { WordCloudItem } from "@/types";
-import { Card } from "@/components/ui/card";
+import { Tag } from "lucide-react";
+import type { LexicalStatsItem } from "@/types";
 
 export interface WordCloudProps {
-  words: WordCloudItem[];
+  words: LexicalStatsItem[];
+  onTagClick?: (word: string) => void;
 }
 
-export function WordCloud({ words }: WordCloudProps) {
-  const positioned = useMemo(() => {
-    if (words.length === 0) return [];
-    const sorted = [...words].sort((a, b) => b.weight - a.weight);
-    const placed: Array<{ x: number; y: number; w: number }> = [];
-    const maxW = 100;
-    const grid: boolean[][] = Array.from({ length: 14 }, () =>
-      Array.from({ length: 24 }, () => false)
+export function WordCloud({ words, onTagClick }: WordCloudProps) {
+  if (!words || words.length === 0) {
+    return (
+      <div className="rounded-xl border border-card-border bg-card p-5">
+        <div className="flex items-center gap-2">
+          <Tag className="h-4 w-4 text-muted" />
+          <h3 className="text-sm font-semibold text-foreground">
+            Лексический портрет видео
+          </h3>
+        </div>
+        <p className="mt-3 text-sm text-muted">
+          Нет ключевых слов для отображения.
+        </p>
+      </div>
     );
+  }
 
-    return sorted.map((w, i) => {
-      const fontSize = 11 + w.weight * 18;
-      const cols = Math.max(2, Math.round((fontSize / 14) * 4));
-      const rows = Math.max(1, Math.round((fontSize / 14) * 2));
-
-      let x = 2;
-      let y = 2;
-      let placedFlag = false;
-
-      for (let attempt = 0; attempt < 200 && !placedFlag; attempt++) {
-        x = Math.floor(Math.random() * (24 - cols));
-        y = Math.floor(Math.random() * (14 - rows));
-        let overlap = false;
-        for (let dy = 0; dy < rows && !overlap; dy++) {
-          for (let dx = 0; dx < cols && !overlap; dx++) {
-            if (grid[y + dy][x + dx]) overlap = true;
-          }
-        }
-        if (!overlap) {
-          for (let dy = 0; dy < rows; dy++) {
-            for (let dx = 0; dx < cols; dx++) {
-              grid[y + dy][x + dx] = true;
-            }
-          }
-          placedFlag = true;
-        }
-      }
-
-      if (!placedFlag) {
-        x = i % 8;
-        y = (i % 6) * 2;
-      }
-
-      placed.push({ x, y, w: cols });
-      return { word: w, x, y, cols, rows, fontSize };
-    });
-  }, [words]);
-
-  const sentimentColor = (s: WordCloudItem["sentiment"]) => {
-    if (s === "positive") return "text-green-700";
-    if (s === "negative") return "text-red-700";
-    return "text-ink";
-  };
+  const maxValue = words[0]?.value || 1;
 
   return (
-    <Card className="p-4">
-      <h3 className="mb-3 text-sm font-semibold text-ink">Lexical portrait</h3>
-      <div className="relative h-[220px] w-full">
-        {positioned.map((p, i) => (
-          <span
-            key={i}
-            className={`absolute whitespace-nowrap font-medium ${sentimentColor(
-              p.word.sentiment
-            )}`}
-            style={{
-              left: `${(p.x / 24) * 100}%`,
-              top: `${(p.y / 14) * 100}%`,
-              fontSize: `${p.fontSize}px`,
-              opacity: 0.6 + p.word.weight * 0.4,
-            }}
-          >
-            {p.word.word}
-          </span>
-        ))}
+    <div className="rounded-xl border border-card-border bg-card p-5">
+      <div className="flex items-center gap-2">
+        <Tag className="h-4 w-4 text-muted" />
+        <h3 className="text-sm font-semibold text-foreground">
+          Лексический портрет видео
+        </h3>
       </div>
-    </Card>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {words.map((item) => {
+          const ratio = item.value / maxValue; // 0..1
+          const fontSize = ratio > 0.7 ? "text-xl" : ratio > 0.4 ? "text-base" : "text-sm";
+          const opacity = ratio > 0.7 ? "1" : ratio > 0.4 ? "0.8" : "0.55";
+          const isInteractive = !!onTagClick;
+
+          return (
+            <button
+              key={item.text}
+              type="button"
+              onClick={() => onTagClick?.(item.text)}
+              disabled={!isInteractive}
+              className={`group inline-flex items-center rounded-md border border-card-border bg-background/40 px-2 py-0.5 font-medium text-foreground transition-all duration-200 ${fontSize} hover:border-brand-yellow hover:bg-brand-yellow/10 hover:text-brand-yellow hover:shadow-[0_0_12px_rgba(255,199,0,0.4)] hover:scale-105 disabled:cursor-default disabled:hover:scale-100 disabled:hover:border-card-border disabled:hover:bg-background/40 disabled:hover:text-foreground disabled:hover:shadow-none`}
+              style={{ opacity }}
+            >
+              {item.text}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

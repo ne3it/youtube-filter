@@ -22,6 +22,7 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [lexicalStats, setLexicalStats] = useState<LexicalStatsItem[]>([]);
   const [timelineData, setTimelineData] = useState<TimelineDataItem[]>([]);
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
 
   const handlePresetClick = (presetId: string) => {
     const preset = PRESETS.find((p) => p.id === presetId);
@@ -39,6 +40,9 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setLexicalStats([]);
+    setTimelineData([]);
+    setSelectedWord(null);
 
     try {
       // 1. Получаем чанки субтитров
@@ -165,24 +169,6 @@ export default function Home() {
           <div className="mt-12 w-full max-w-4xl space-y-6 animate-fade-in">
             {result && <SummaryCard result={result} userFocus={focus} />}
 
-            {lexicalStats.length > 0 && (
-              <div className="rounded-none border border-card-border bg-card p-5">
-                <h3 className="mb-3 text-sm font-semibold text-foreground">
-                  Лексический портрет
-                </h3>
-                <div className="flex flex-wrap gap-x-6 gap-y-2">
-                  {lexicalStats.map((item, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">
-                        {item.text}
-                      </span>
-                      <span className="text-xs text-muted">{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <TimelineChart
@@ -195,14 +181,8 @@ export default function Home() {
               </div>
               <div>
                 <WordCloud
-                  words={
-                    result?.wordCloud ||
-                    lexicalStats.map((l) => ({
-                      word: l.text,
-                      weight: l.value / (lexicalStats[0]?.value || 1),
-                      sentiment: "neutral" as const,
-                    }))
-                  }
+                  words={lexicalStats}
+                  onTagClick={setSelectedWord}
                 />
               </div>
             </div>
