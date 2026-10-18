@@ -259,19 +259,35 @@ function extractCaptionTracks(html: string): any[] {
 }
 
 /**
- * Парсит XML-субтитры YouTube (формат timedtext).
- * Поддерживает srv3 (<p t="ms" d="s">) и классический (<text start="s" dur="s">).
- * Использует гибкий разбор атрибутов, независимый от порядка.
+ * Парсит ответ субтитров YouTube.
+ * Поддерживает:
+ *  - srv3/XML: <p t="ms" d="s">Текст</p> или <text start="s" dur="s">Текст</text>
+ *  - json3: JSON-массив {start, dur, text} (start/dur в секундах)
  */
-function parseTranscriptXml(xml: string): Array<{ text: string; start: number; duration: number }> {
+function parseTranscriptResponse(content: string): Array<{ text: string; start: number; duration: number }> {
   const result: Array<{ text: string; start: number; duration: number }> = [];
 
-  // YouTube использует два формата:
-  // 1. srv3: <p t="1234" d="5.6">Текст</p>  (t=ms, d=s)
-  // 2. Классический: <text start="1.5" dur="3.0">Текст</text> (start=s, dur=s)
+  // Пробуем JSON (json3 формат)
+  try {
+    const json = JSON.parse(content);
+    if (Array.isArray(json)) {
+      for (const item of json) {
+        const text = decodeHtml(item.text || "").trim();
+        if (!text) continue;
+        result.push({
+          text,
+          start: Number(item.start) * 1000 || 0,
+          duration: Number(item.dur) * 1000 || 0,
+        });
+      }
+      if (result.length > 0) return result;
+    }
+  } catch {
+    // Не JSON — пробуем XML
+  }
 
   // Общий regex для <p> с любыми атрибутами и многострочным текстом
-  const pMatches = xml.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g);
+  const pMatches = content.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g);
   for (const m of pMatches) {
     const attrs = m[1];
     const text = decodeHtml(m[2]).trim();
@@ -291,7 +307,7 @@ function parseTranscriptXml(xml: string): Array<{ text: string; start: number; d
   if (result.length > 0) return result;
 
   // Общий regex для <text> с любыми атрибутами
-  const textMatches = xml.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/g);
+  const textMatches = content.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/g);
   for (const m of textMatches) {
     const attrs = m[1];
     const text = decodeHtml(m[2]).trim();
@@ -327,6 +343,9 @@ export async function fetchTranscript(
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Referer": "https://www.youtube.com/",
+      "Origin": "https://www.youtube.com",
     },
   });
 
@@ -343,33 +362,67 @@ export async function fetchTranscript(
 
   // 2. Выбираем нужный трек (приоритет: указанный язык, иначе первый доступный)
   const track = tracks.find((t: any) => t.languageCode === lang) || tracks[0];
-  const baseUrl = track?.baseUrl;
+  let baseUrl = track?.baseUrl;
   if (!baseUrl) {
     throw new Error("Caption track has no baseUrl");
   }
 
-  // 3. Грузим XML-субтитры (kind=asr для автогенерированных)
-  const xmlUrl = baseUrl.includes("?") ? `${baseUrl}&kind=asr` : `${baseUrl}?kind=asr`;
-  const xmlRes = await fetch(xmlUrl, {
-    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-  });
+  // YouTube возвращает baseUrl с параметрами (ei, c, caps, ip, cpn, etc.),
+  // которые необходимы для доступа. Используем оригинальный baseUrl,
+  // добавляя kind=asr для автогенерированных субтитров.
+  const urlVariants = [
+    baseUrl.includes("?") ? `${baseUrl}&kind=asr` : `${baseUrl}?kind=asr`,
+    baseUrl.includes("?") ? `${baseUrl}&fmt=srv3` : `${baseUrl}?fmt=srv3`,
+    baseUrl.includes("?") ? `${baseUrl}&kind=asr&fmt=srv3` : `${baseUrl}?kind=asr&fmt=srv3`,
+    baseUrl.includes("?") ? `${baseUrl}&fmt=json3` : `${baseUrl}?fmt=json3`,
+    baseUrl, // чистый baseUrl без изменений
+  ];
 
-  if (!xmlRes.ok) {
-    // Пробуем без kind-параметра
-    const fallbackRes = await fetch(baseUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    });
-    if (!fallbackRes.ok) {
-      throw new Error(`Failed to fetch transcript XML: HTTP ${fallbackRes.status}`);
+  let lastError: Error | null = null;
+  for (const xmlUrl of urlVariants) {
+    try {
+      const xmlRes = await fetch(xmlUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Referer": "https://www.youtube.com/",
+          "Accept": "application/json, text/xml, */*",
+        },
+      });
+      if (!xmlRes.ok) {
+        lastError = new Error(`HTTP ${xmlRes.status} for ${xmlUrl.slice(0, 60)}`);
+        continue;
+      }
+      const xmlText = await xmlRes.text();
+      console.warn("[fetchTranscript] XML (variant):", xmlText.slice(0, 300));
+      const parsed = parseTranscriptResponse(xmlText);
+      if (parsed.length > 0) return parsed;
+      lastError = new Error("No transcript entries found in XML");
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
-    const xmlText = await fallbackRes.text();
-    const parsed = parseTranscriptXml(xmlText);
-    if (parsed.length === 0) throw new Error("No transcript entries found in XML");
-    return parsed;
   }
 
-  const xmlText = await xmlRes.text();
-  const parsed = parseTranscriptXml(xmlText);
-  if (parsed.length === 0) throw new Error("No transcript entries found in XML");
-  return parsed;
+  // Fallback: публичный прокси youtubetranscript.com
+  const fallbackEndpoints = [
+    `https://youtubetranscript.com/?v=${videoId}&lang=${lang}`,
+    `https://youtubetranscript.com/?v=${videoId}`,
+  ];
+  for (const endpoint of fallbackEndpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; YouTubeFilter/1.0)",
+          "Referer": "https://www.youtube.com/",
+        },
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      const parsed = parseTranscriptResponse(text);
+      if (parsed.length > 0) return parsed;
+    } catch {
+      // continue
+    }
+  }
+
+  throw lastError || new Error("Could not fetch transcript");
 }
