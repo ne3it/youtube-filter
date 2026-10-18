@@ -65,30 +65,48 @@ export async function analyzeChunkWithAI(
 }
 
 async function callOpenRouter(prompt: string): Promise<any> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${OR_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://my-youtube-filter.app",
-      "X-Title": "YouTube Concept Filter",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.0-flash-001",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-      max_tokens: 1024,
-    }),
-  });
+  // Пробуем несколько бесплатных моделей OpenRouter по порядку
+  const models = [
+    "qwen/qwen2.5-72b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemini-2.0-flash-lite-001",
+  ];
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenRouter error ${res.status}: ${err}`);
+  let lastError: Error | null = null;
+  for (const model of models) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OR_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://my-youtube-filter.app",
+          "X-Title": "YouTube Concept Filter",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        lastError = new Error(`OpenRouter ${model} error ${res.status}: ${err}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content ?? "";
+      return parseChunkResponse(content);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content ?? "";
-  return parseChunkResponse(content);
+  throw lastError || new Error("All OpenRouter models failed");
 }
 
 async function callHuggingFace(prompt: string): Promise<any> {

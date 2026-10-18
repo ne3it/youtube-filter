@@ -336,35 +336,43 @@ function parseTranscriptResponse(content: string): Array<{ text: string; start: 
 export async function fetchTranscript(
   videoId: string,
   lang: string = "en"
-): Promise<Array<{ text: string; start: number; duration: number }>> {
-  // 1. Грузим страницу видео
+): Promise<Array<{ text: string; start: number; duration: number }> | { requiresManualInput: true }> {
+  // 1. Грузим страницу видео с полной имитацией браузера
   const pageUrl = `https://www.youtube.com/watch?v=${videoId}`;
   const pageRes = await fetch(pageUrl, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Referer": "https://www.youtube.com/",
       "Origin": "https://www.youtube.com",
+      "Sec-Ch-Ua": '"Chromium";v="120", "Not(A:="";v="24"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-User": "?1",
+      "Upgrade-Insecure-Requests": "1",
     },
   });
 
   if (!pageRes.ok) {
-    throw new Error(`Failed to fetch YouTube page: HTTP ${pageRes.status}`);
+    return { requiresManualInput: true };
   }
 
   const html = await pageRes.text();
   const tracks = extractCaptionTracks(html);
 
   if (tracks.length === 0) {
-    throw new Error("No captions available for this video");
+    return { requiresManualInput: true };
   }
 
   // 2. Выбираем нужный трек (приоритет: указанный язык, иначе первый доступный)
   const track = tracks.find((t: any) => t.languageCode === lang) || tracks[0];
   let baseUrl = track?.baseUrl;
   if (!baseUrl) {
-    throw new Error("Caption track has no baseUrl");
+    return { requiresManualInput: true };
   }
 
   // YouTube возвращает baseUrl с параметрами (ei, c, caps, ip, cpn, etc.),
@@ -378,16 +386,18 @@ export async function fetchTranscript(
     baseUrl, // чистый baseUrl без изменений
   ];
 
+  const fetchHeaders = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.youtube.com/",
+    "Accept": "application/json, text/xml, */*",
+    "Sec-Ch-Ua": '"Chromium";v="120", "Not(A:="";v="24"',
+    "Sec-Ch-Ua-Platform": '"Windows"',
+  };
+
   let lastError: Error | null = null;
   for (const xmlUrl of urlVariants) {
     try {
-      const xmlRes = await fetch(xmlUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Referer": "https://www.youtube.com/",
-          "Accept": "application/json, text/xml, */*",
-        },
-      });
+      const xmlRes = await fetch(xmlUrl, { headers: fetchHeaders });
       if (!xmlRes.ok) {
         lastError = new Error(`HTTP ${xmlRes.status} for ${xmlUrl.slice(0, 60)}`);
         continue;
@@ -424,5 +434,5 @@ export async function fetchTranscript(
     }
   }
 
-  throw lastError || new Error("Could not fetch transcript");
+  return { requiresManualInput: true };
 }
