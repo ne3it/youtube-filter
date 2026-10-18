@@ -5,7 +5,7 @@ import { SummaryCard } from "@/components/dashboard/summary-card";
 import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
-import type { AnalysisResult } from "@/types";
+import type { AnalysisResult, LexicalStatsItem, TimelineDataItem } from "@/types";
 
 const PRESETS = [
   { id: "academic", label: "Академический" },
@@ -20,6 +20,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [lexicalStats, setLexicalStats] = useState<LexicalStatsItem[]>([]);
+  const [timelineData, setTimelineData] = useState<TimelineDataItem[]>([]);
 
   const handlePresetClick = (presetId: string) => {
     const preset = PRESETS.find((p) => p.id === presetId);
@@ -56,17 +58,11 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transcript: {
-            videoId,
-            segments: chunks.map((c: any) => ({
-              text: c.text,
-              start: c.startTime,
-              duration: Math.max(0, c.endTime - c.startTime),
-            })),
-            title: "",
-            channel: "",
-            language: "ru",
-          },
+          chunks: chunks.map((c: any) => ({
+            chunkId: c.chunkId,
+            text: c.text,
+            timestamp: c.timestamp,
+          })),
           userFocus: focus,
         }),
       });
@@ -75,7 +71,8 @@ export default function Home() {
         throw new Error(err.error || "Анализ не удался");
       }
       const data = await analyzeRes.json();
-      setResult(data.result);
+      setLexicalStats(data.lexicalStats || []);
+      setTimelineData(data.timelineData || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
@@ -164,18 +161,53 @@ export default function Home() {
         </div>
 
         {/* Результаты анализа */}
-        {result && (
+        {(result || timelineData.length > 0) && (
           <div className="mt-12 w-full max-w-4xl space-y-6 animate-fade-in">
-            <SummaryCard result={result} userFocus={focus} />
+            {result && <SummaryCard result={result} userFocus={focus} />}
+
+            {lexicalStats.length > 0 && (
+              <div className="rounded-none border border-card-border bg-card p-5">
+                <h3 className="mb-3 text-sm font-semibold text-foreground">
+                  Лексический портрет
+                </h3>
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  {lexicalStats.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {item.text}
+                      </span>
+                      <span className="text-xs text-muted">{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2">
-                <TimelineChart points={result.semanticTimeline} />
+                <TimelineChart
+                  points={result?.semanticTimeline || timelineData.map((t) => ({
+                    t: t.chunkId * 60000,
+                    density: t.score / 100,
+                    label: t.timestamp,
+                  }))}
+                />
               </div>
               <div>
-                <WordCloud words={result.wordCloud} />
+                <WordCloud
+                  words={
+                    result?.wordCloud ||
+                    lexicalStats.map((l) => ({
+                      word: l.text,
+                      weight: l.value / (lexicalStats[0]?.value || 1),
+                      sentiment: "neutral" as const,
+                    }))
+                  }
+                />
               </div>
             </div>
-            <ThesisList theses={result.theses} />
+
+            {result && <ThesisList theses={result.theses} />}
           </div>
         )}
 

@@ -1,64 +1,74 @@
-import type { AnalysisRequest } from "@/types";
-
+const AI_API_KEY = process.env.AI_API_KEY;
 const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
 const OR_API_KEY = process.env.OPENROUTER_API_KEY;
 
-export const AI_PROVIDER = OR_API_KEY ? "openrouter" : HF_API_KEY ? "huggingface" : "none";
+export const AI_PROVIDER = OR_API_KEY
+  ? "openrouter"
+  : AI_API_KEY
+    ? "huggingface"
+    : HF_API_KEY
+      ? "huggingface"
+      : "none";
 
-const SYSTEM_PROMPT = `You are an AI-powered anatomical concept filter for YouTube videos.
-Your task: extract the conceptual "skeleton" of a video transcript.
-Be precise, neutral, and evidence-grounded. Never invent claims not supported by the text.
-Respond ONLY with a single JSON object, no markdown, no prose outside JSON.`;
+const SYSTEM_PROMPT = `You are an impartial AI media-context navigator.
+Analyze the video transcript fragment provided with its timestamp.
+Evaluate it strictly through the lens of the user's goal.
+Deliver an objective, intermediate opinion — no toxicity, no subjective "good/bad" verdicts.
+If the author presents an alternative or non-standard viewpoint, do NOT label it as fake science or misinformation.
+Correctly mark it as "alternative" and briefly compare it with the prevailing consensus in this domain
+(scientific, industrial, or IT standard).
+Completely ignore filler, fluff, and ad integrations unrelated to the topic.
+Respond ONLY with a single valid JSON object, no markdown, no prose outside JSON.`;
 
-const USER_PROMPT_TEMPLATE = (req: AnalysisRequest) => JSON.stringify({
-  videoId: req.videoId,
-  title: req.title,
-  userFocus: req.userFocus,
-  chunks: req.chunks.map((c: any) => ({ index: c.chunkId ?? c.index, text: c.text })),
+const USER_PROMPT_TEMPLATE = (chunkText: string, chunkTime: string, userFocus: string) => JSON.stringify({
+  chunkTime,
+  userFocus,
+  chunkText,
   instructions: {
-    summary: "1-2 sentences capturing the video's central claim.",
-    coreConcept: "The single most dominant concept or thesis.",
-    conceptScores: "Array of {concept, score(0-100), weight(0-1), evidence(quote), timestamp(ms)}. 5-8 items.",
-    semanticTimeline: "Array of {t(ms), density(0-1), label}. 6-10 points across the video.",
-    wordCloud: "Array of {word, weight(0-1), sentiment}. 12-18 items.",
-    theses: "Array of {id, claim, support(quote), confidence(0-1), timestamp(ms)}. 3-5 alternative theses."
+    summary: "1-2 sentences capturing the essence of this fragment.",
+    perspective: "Either 'consensus' for standard view or 'alternative' for non-standard view.",
+    analysis: "Concise, neutral AI intermediate opinion, cross-referenced with known knowledge base.",
+    score: "Integer 0-100. 0 = pure ad/filler, 100 = pure scientific/practical concentrate."
   }
 }, null, 2);
 
-export function buildAnalysisPrompt(req: AnalysisRequest): string {
-  return `${SYSTEM_PROMPT}\n\n${USER_PROMPT_TEMPLATE(req)}`;
+function buildChunkPrompt(chunkText: string, chunkTime: string, userFocus: string): string {
+  return `${SYSTEM_PROMPT}\n\n${USER_PROMPT_TEMPLATE(chunkText, chunkTime, userFocus)}`;
 }
 
-export function getProviderStatus(): { provider: string; configured: boolean } {
-  return {
-    provider: AI_PROVIDER,
-    configured: AI_PROVIDER !== "none",
-  };
+function getActiveToken(): string | undefined {
+  return AI_API_KEY || HF_API_KEY || OR_API_KEY;
 }
 
 /**
- * Отправляет запрос к выбранному провайдеру и возвращает AnalysisResult.
- * Использует OpenRouter при наличии ключа, иначе Hugging Face.
+ * Отправляет один чанк текста в бесплатный ИИ-провайдер.
+ * Использует Hugging Face Inference API (по умолчанию Qwen2.5-72B-Instruct)
+ * или OpenRouter при наличии соответствующего ключа.
  */
-export async function analyzeWithAI(req: AnalysisRequest): Promise<any> {
-  const prompt = buildAnalysisPrompt(req);
+export async function analyzeChunkWithAI(
+  chunkText: string,
+  chunkTime: string,
+  userFocus: string
+): Promise<any> {
+  const token = getActiveToken();
+  if (!token) {
+    throw new Error("No AI API key configured. Set AI_API_KEY (or HUGGINGFACE_API_KEY / OPENROUTER_API_KEY) in .env.local");
+  }
+
+  const prompt = buildChunkPrompt(chunkText, chunkTime, userFocus);
 
   if (AI_PROVIDER === "openrouter" && OR_API_KEY) {
-    return callOpenRouter(prompt, req);
+    return callOpenRouter(prompt);
   }
 
-  if (AI_PROVIDER === "huggingface" && HF_API_KEY) {
-    return callHuggingFace(prompt, req);
-  }
-
-  throw new Error("No AI provider configured. Set HUGGINGFACE_API_KEY or OPENROUTER_API_KEY in .env.local");
+  return callHuggingFace(prompt);
 }
 
-async function callOpenRouter(prompt: string, req: AnalysisRequest): Promise<any> {
+async function callOpenRouter(prompt: string): Promise<any> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${OR_API_KEY}`,
+      Authorization: `Bearer ${OR_API_KEY}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://my-youtube-filter.app",
       "X-Title": "YouTube Concept Filter",
@@ -67,7 +77,7 @@ async function callOpenRouter(prompt: string, req: AnalysisRequest): Promise<any
       model: "google/gemini-2.0-flash-001",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
-      max_tokens: 4096,
+      max_tokens: 1024,
     }),
   });
 
@@ -78,21 +88,25 @@ async function callOpenRouter(prompt: string, req: AnalysisRequest): Promise<any
 
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content ?? "";
-  return parseAIResponse(content, req);
+  return parseChunkResponse(content);
 }
 
-async function callHuggingFace(prompt: string, req: AnalysisRequest): Promise<any> {
-  const res = await fetch("https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${HF_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      inputs: prompt,
-      parameters: { max_new_tokens: 4096, temperature: 0.2, return_full_text: false },
-    }),
-  });
+async function callHuggingFace(prompt: string): Promise<any> {
+  const token = AI_API_KEY || HF_API_KEY;
+  const res = await fetch(
+    "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-72B-Instruct",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: { max_new_tokens: 1024, temperature: 0.2, return_full_text: false },
+      }),
+    }
+  );
 
   if (!res.ok) {
     const err = await res.text();
@@ -101,33 +115,32 @@ async function callHuggingFace(prompt: string, req: AnalysisRequest): Promise<an
 
   const data = await res.json();
   const content = Array.isArray(data) ? (data[0]?.generated_text ?? "") : (data.generated_text ?? "");
-  return parseAIResponse(content, req);
+  return parseChunkResponse(content);
 }
 
-function parseAIResponse(content: string, req: AnalysisRequest): any {
-  // Extract JSON from possible markdown code fences
-  const jsonMatch = content.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("AI response did not contain valid JSON");
-  }
-
-  let parsed: any;
+function parseChunkResponse(content: string): any {
   try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch {
-    throw new Error("Failed to parse AI JSON response");
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("No JSON found in AI response");
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      summary: typeof parsed.summary === "string" ? parsed.summary : "",
+      perspective: parsed.perspective === "alternative" ? "alternative" : "consensus",
+      analysis: typeof parsed.analysis === "string" ? parsed.analysis : "",
+      score: typeof parsed.score === "number" ? parsed.score : 0,
+    };
+  } catch (err) {
+    throw new Error(
+      `Failed to parse AI JSON response: ${err instanceof Error ? err.message : "unknown"}`
+    );
   }
+}
 
+export function getProviderStatus(): { provider: string; configured: boolean } {
   return {
-    videoId: req.videoId,
-    title: req.title,
-    channel: (parsed.channel as string) ?? "Unknown channel",
-    summary: (parsed.summary as string) ?? "",
-    coreConcept: (parsed.coreConcept as string) ?? "",
-    conceptScores: Array.isArray(parsed.conceptScores) ? parsed.conceptScores : [],
-    semanticTimeline: Array.isArray(parsed.semanticTimeline) ? parsed.semanticTimeline : [],
-    wordCloud: Array.isArray(parsed.wordCloud) ? parsed.wordCloud : [],
-    theses: Array.isArray(parsed.theses) ? parsed.theses : [],
-    generatedAt: Date.now(),
+    provider: AI_PROVIDER,
+    configured: AI_PROVIDER !== "none",
   };
 }

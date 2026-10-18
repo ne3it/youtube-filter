@@ -79,4 +79,19 @@ export interface HistoryEntry {
   createdAt: number;
 }
 
+export interface LexicalStatsItem {
+  text: string;
+  value: number;
+}
+
+export interface TimelineDataItem {
+  chunkId: number;
+  timestamp: string;
+  summary: string;
+  perspective: "consensus" | "alternative";
+  analysis: string;
+  score: number;
+  error?: boolean;
+}
+
 export type Theme = "light" | "dark";
