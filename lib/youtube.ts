@@ -199,3 +199,96 @@ export function normalizeTranscript(
       })),
   };
 }
+
+/**
+ * Декодирует HTML-сущности в тексте субтитров.
+ */
+function decodeHtml(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&apos;/g, "'");
+}
+
+/**
+ * Получает субтитры YouTube через публичные endpoints.
+ * Пробует несколько форматов: JSON (youtranscript.com) и XML (timedtext).
+ * Возвращает массив { text, start, duration } (start/duration в миллисекундах).
+ */
+export async function fetchTranscript(
+  videoId: string,
+  lang: string = "en"
+): Promise<Array<{ text: string; start: number; duration: number }>> {
+  const endpoints = [
+    `https://youtubetranscript.com/?v=${videoId}&lang=${lang}`,
+    `https://youtubetranscript.com/?v=${videoId}`,
+    `https://youtranscript.com/?v=${videoId}&lang=${lang}`,
+  ];
+
+  let lastError: Error | null = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; YouTubeFilter/1.0)" },
+      });
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status} for ${endpoint}`);
+        continue;
+      }
+      const text = await res.text();
+
+      // Попытка 1: JSON-массив {text, start, duration}
+      try {
+        const json = JSON.parse(text);
+        if (Array.isArray(json) && json.length > 0) {
+          return json.map((item: any) => ({
+            text: typeof item.text === "string" ? decodeHtml(item.text) : "",
+            start: Number(item.start) || 0,
+            duration: Number(item.duration) || 0,
+          })).filter((s) => s.text.trim().length > 0);
+        }
+      } catch {
+        // Не JSON — пробуем XML
+      }
+
+      // Попытка 2: XML-разметка <text start="s" dur="s">...</text>
+      const xmlMatches = text.matchAll(/<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([^<]*)<\/text>/g);
+      const result: Array<{ text: string; start: number; duration: number }> = [];
+      for (const m of xmlMatches) {
+        const decoded = decodeHtml(m[3]);
+        if (decoded.trim().length === 0) continue;
+        result.push({
+          text: decoded,
+          start: Number(m[1]) * 1000,
+          duration: Number(m[2]) * 1000,
+        });
+      }
+      if (result.length > 0) return result;
+
+      // Попытка 3: srv3-формат <p t="ms" d="s">...</p>
+      const srv3Matches = text.matchAll(/<p\s+t="(\d+)"\s+d="([\d.]+)"[^>]*>([^<]*)<\/p>/g);
+      const srv3Result: Array<{ text: string; start: number; duration: number }> = [];
+      for (const m of srv3Matches) {
+        const decoded = decodeHtml(m[3]);
+        if (decoded.trim().length === 0) continue;
+        srv3Result.push({
+          text: decoded,
+          start: Number(m[1]),
+          duration: Number(m[2]) * 1000,
+        });
+      }
+      if (srv3Result.length > 0) return srv3Result;
+
+      lastError = new Error(`No transcript entries found in response from ${endpoint}`);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  throw lastError || new Error("Could not fetch transcript");
+}

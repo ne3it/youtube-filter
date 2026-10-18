@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { YoutubeTranscript } from "youtube-transcript";
-import { extractVideoId, splitIntoChunks } from "@/lib/youtube";
+import { extractVideoId, splitIntoChunks, fetchTranscript } from "@/lib/youtube";
 
 export async function POST(request: Request) {
   try {
@@ -16,33 +15,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Неверный формат ссылки" }, { status: 400 });
     }
 
-    let raw: Awaited<ReturnType<typeof YoutubeTranscript.fetchTranscript>>;
+    let subtitles: Array<{ text: string; start: number; duration: number }>;
     try {
-      raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: "ru" });
+      subtitles = await fetchTranscript(videoId, "ru");
     } catch {
       try {
-        raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: "en" });
-      } catch {
+        subtitles = await fetchTranscript(videoId, "en");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown";
         return NextResponse.json(
-          { error: "Субтитры недоступны для этого видео" },
+          { error: `Субтитры недоступны для этого видео: ${message}` },
           { status: 404 }
         );
       }
     }
 
-    if (!Array.isArray(raw) || raw.length === 0) {
+    if (!Array.isArray(subtitles) || subtitles.length === 0) {
       return NextResponse.json(
         { error: "Субтитры недоступны для этого видео" },
         { status: 404 }
       );
     }
-
-    // youtube-transcript: TranscriptResponse { text, duration, offset, lang? }
-    const subtitles = raw.map((s) => ({
-      text: s.text,
-      start: Number((s as any).offset ?? (s as any).start ?? 0) || 0,
-      duration: Number((s as any).duration ?? 0) || 0,
-    }));
 
     const chunks = splitIntoChunks(subtitles, 300);
 
