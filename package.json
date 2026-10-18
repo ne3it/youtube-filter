@@ -15,7 +15,8 @@
     "lucide-react": "^0.408.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.4",
-    "class-variance-authority": "^0.7.0"
+    "class-variance-authority": "^0.7.0",
+    "youtube-transcript": "^1.0.2"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

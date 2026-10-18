@@ -1,4 +1,4 @@
-import type { AnalysisRequest, AnalysisResult, Chunk } from "@/types";
+import type { AnalysisRequest } from "@/types";
 
 const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
 const OR_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -14,7 +14,7 @@ const USER_PROMPT_TEMPLATE = (req: AnalysisRequest) => JSON.stringify({
   videoId: req.videoId,
   title: req.title,
   userFocus: req.userFocus,
-  chunks: req.chunks.map((c: Chunk) => ({ index: c.index, text: c.text })),
+  chunks: req.chunks.map((c: any) => ({ index: c.chunkId ?? c.index, text: c.text })),
   instructions: {
     summary: "1-2 sentences capturing the video's central claim.",
     coreConcept: "The single most dominant concept or thesis.",
@@ -40,7 +40,7 @@ export function getProviderStatus(): { provider: string; configured: boolean } {
  * Отправляет запрос к выбранному провайдеру и возвращает AnalysisResult.
  * Использует OpenRouter при наличии ключа, иначе Hugging Face.
  */
-export async function analyzeWithAI(req: AnalysisRequest): Promise<AnalysisResult> {
+export async function analyzeWithAI(req: AnalysisRequest): Promise<any> {
   const prompt = buildAnalysisPrompt(req);
 
   if (AI_PROVIDER === "openrouter" && OR_API_KEY) {
@@ -54,7 +54,7 @@ export async function analyzeWithAI(req: AnalysisRequest): Promise<AnalysisResul
   throw new Error("No AI provider configured. Set HUGGINGFACE_API_KEY or OPENROUTER_API_KEY in .env.local");
 }
 
-async function callOpenRouter(prompt: string, req: AnalysisRequest): Promise<AnalysisResult> {
+async function callOpenRouter(prompt: string, req: AnalysisRequest): Promise<any> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -81,7 +81,7 @@ async function callOpenRouter(prompt: string, req: AnalysisRequest): Promise<Ana
   return parseAIResponse(content, req);
 }
 
-async function callHuggingFace(prompt: string, req: AnalysisRequest): Promise<AnalysisResult> {
+async function callHuggingFace(prompt: string, req: AnalysisRequest): Promise<any> {
   const res = await fetch("https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3", {
     method: "POST",
     headers: {
@@ -104,7 +104,7 @@ async function callHuggingFace(prompt: string, req: AnalysisRequest): Promise<An
   return parseAIResponse(content, req);
 }
 
-function parseAIResponse(content: string, req: AnalysisRequest): AnalysisResult {
+function parseAIResponse(content: string, req: AnalysisRequest): any {
   // Extract JSON from possible markdown code fences
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
