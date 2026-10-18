@@ -24,8 +24,6 @@ export default function Home() {
     timelineData: TimelineDataItem[];
   } | null>(null);
   const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
-  const [manualText, setManualText] = useState("");
-  const [showManualInput, setShowManualInput] = useState(false);
   const [loaderStep, setLoaderStep] = useState(0);
   const thesisListRef = useRef<HTMLDivElement>(null);
 
