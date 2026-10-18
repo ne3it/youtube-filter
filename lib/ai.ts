@@ -1,7 +1,3 @@
-const AI_API_KEY = process.env.AI_API_KEY;
-
-export const AI_PROVIDER = AI_API_KEY ? "openrouter" : "none";
-
 const MODEL_NAME = "google/gemini-2.5-flash";
 
 const SYSTEM_PROMPT = `You are an impartial AI media-context navigator.
@@ -32,50 +28,64 @@ function buildChunkPrompt(chunkText: string, chunkTime: string, userFocus: strin
 
 /**
  * Отправляет один чанк текста в OpenRouter API.
- * Использует модель google/gemini-2.5-flash (бесплатная, стабильная).
+ * Использует модель qwen/qwen2.5-72b-instruct:free (бесплатная, стабильная).
  */
 export async function analyzeChunkWithAI(
   chunkText: string,
   chunkTime: string,
   userFocus: string
 ): Promise<any> {
-  const token = AI_API_KEY;
+  // Читаем ключ динамически, чтобы не было проблем с инициализацией на этапе сборки
+  const token = process.env.AI_API_KEY || process.env.OPENROUTER_API_KEY;
   if (!token) {
     throw new Error("No AI API key configured. Set AI_API_KEY in .env.local");
   }
 
   const prompt = buildChunkPrompt(chunkText, chunkTime, userFocus);
 
-  try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "AI Anatomy YouTube Filter",
-      },
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-        max_tokens: 1024,
-        response_format: { type: "json_object" },
-      }),
-    });
+  // Пробуем несколько стабильных моделей OpenRouter по порядку
+  const models = [
+    "google/gemini-2.5-flash",
+    "google/gemini-2.0-flash-lite-001",
+    "mistralai/mistral-7b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+  ];
 
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`OpenRouter ${MODEL_NAME} error ${res.status}: ${err}`);
+  let lastError: Error | null = null;
+  for (const model of models) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "http://localhost:3000",
+          "X-Title": "AI Anatomy YouTube Filter",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2,
+          max_tokens: 1024,
+          response_format: { type: "json_object" },
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        lastError = new Error(`OpenRouter ${model} error ${res.status}: ${err}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content ?? "";
+      return parseChunkResponse(content);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content ?? "";
-    return parseChunkResponse(content);
-  } catch (err) {
-    console.error("OpenRouter request failed, using fallback:", err);
-    return getFallbackResponse();
   }
+
+  throw lastError || new Error("All OpenRouter models failed");
 }
 
 /**
@@ -130,8 +140,9 @@ export function getFallbackResponse(): any {
 }
 
 export function getProviderStatus(): { provider: string; configured: boolean } {
+  const token = process.env.AI_API_KEY || process.env.OPENROUTER_API_KEY;
   return {
-    provider: AI_PROVIDER,
-    configured: AI_PROVIDER !== "none",
+    provider: token ? "openrouter" : "none",
+    configured: !!token,
   };
 }
