@@ -1,105 +1,100 @@
-import { useEffect, useRef } from "react";
-import type { SemanticPoint } from "@/types";
-import { Card } from "@/components/ui/card";
+import { useState } from "react";
+import type { TimelineSegment } from "@/types";
 
 export interface TimelineChartProps {
-  points: SemanticPoint[];
-  height?: number;
+  data: TimelineSegment[];
+  onSegmentClick?: (index: number) => void;
 }
 
-export function TimelineChart({ points, height = 160 }: TimelineChartProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export function TimelineChart({ data, onSegmentClick }: TimelineChartProps) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || points.length === 0) return;
+  if (!data || data.length === 0) {
+    return (
+      <div className="rounded-xl border border-card-border bg-card p-5">
+        <h3 className="text-sm font-semibold text-foreground">
+          Анатомический срез хронометража
+        </h3>
+        <p className="mt-3 text-sm text-muted">
+          Нет данных для отображения.
+        </p>
+      </div>
+    );
+  }
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
-
-    ctx.clearRect(0, 0, rect.width, height);
-
-    const maxT = Math.max(...points.map((p) => p.t));
-    const minT = Math.min(...points.map((p) => p.t));
-    const range = Math.max(1, maxT - minT);
-
-    const padL = 8;
-    const padR = 8;
-    const padT = 16;
-    const padB = 24;
-    const plotW = rect.width - padL - padR;
-    const plotH = height - padT - padB;
-
-    // ось
-    ctx.strokeStyle = "#e5e3da";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padL, padT + plotH);
-    ctx.lineTo(padL + plotW, padT + plotH);
-    ctx.stroke();
-
-    // линия плотности
-    const coords = points.map((p) => ({
-      x: padL + ((p.t - minT) / range) * plotW,
-      y: padT + plotH - p.density * plotH,
-    }));
-
-    // градиентная заливка
-    const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-    grad.addColorStop(0, "rgba(255, 210, 0, 0.35)");
-    grad.addColorStop(1, "rgba(255, 210, 0, 0.02)");
-
-    ctx.beginPath();
-    ctx.moveTo(padL, padT + plotH);
-    coords.forEach((c) => ctx.lineTo(c.x, c.y));
-    ctx.lineTo(padL + plotW, padT + plotH);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // линия
-    ctx.beginPath();
-    coords.forEach((c, i) => {
-      if (i === 0) ctx.moveTo(c.x, c.y);
-      else ctx.lineTo(c.x, c.y);
-    });
-    ctx.strokeStyle = "#ffd200";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // точки
-    coords.forEach((c) => {
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = "#0a0a0a";
-      ctx.fill();
-    });
-
-    // метки времени
-    ctx.fillStyle = "#7a776d";
-    ctx.font = "10px ui-monospace, monospace";
-    ctx.textAlign = "center";
-    const labelCount = Math.min(5, points.length);
-    for (let i = 0; i < labelCount; i++) {
-      const idx = Math.floor((i / (labelCount - 1)) * (points.length - 1));
-      const p = points[idx];
-      const x = padL + ((p.t - minT) / range) * plotW;
-      const mins = Math.floor(p.t / 60000);
-      const secs = Math.floor((p.t % 60000) / 1000);
-      ctx.fillText(`${mins}:${secs.toString().padStart(2, "0")}`, x, padT + plotH + 14);
+  const barColor = (type: TimelineSegment["type"]) => {
+    switch (type) {
+      case "consensus":
+        return "bg-emerald-500/80";
+      case "alternative":
+        return "bg-brand-yellow";
+      case "water":
+      default:
+        return "bg-neutral-800";
     }
-  }, [points, height]);
+  };
+
+  const hoverBrighten = (type: TimelineSegment["type"]) => {
+    switch (type) {
+      case "consensus":
+        return "bg-emerald-400";
+      case "alternative":
+        return "bg-[#FFE066]";
+      case "water":
+      default:
+        return "bg-neutral-700";
+    }
+  };
 
   return (
-    <Card className="p-4">
-      <h3 className="mb-2 text-sm font-semibold text-ink">Semantic timeline</h3>
-      <canvas ref={canvasRef} style={{ width: "100%", height }} />
-    </Card>
+    <div className="rounded-xl border border-card-border bg-card p-5">
+      <h3 className="text-sm font-semibold text-foreground">
+        Анатомический срез хронометража
+      </h3>
+
+      <div className="mt-4 flex items-end justify-between gap-1" style={{ height: 180 }}>
+        {data.map((segment, i) => {
+          const heightPct = Math.max(8, segment.score);
+          const isHover = hoverIndex === i;
+
+          return (
+            <div
+              key={i}
+              className="group relative flex flex-1 flex-col items-center"
+              onMouseEnter={() => setHoverIndex(i)}
+              onMouseLeave={() => setHoverIndex(null)}
+            >
+              <div
+                className={`w-full max-w-[28px] rounded-sm transition-all duration-200 ${
+                  isHover ? hoverBrighten(segment.type) : barColor(segment.type)
+                }`}
+                style={{ height: `${heightPct}%` }}
+                onClick={() => onSegmentClick?.(i)}
+              />
+
+              {isHover && (
+                <div className="pointer-events-none absolute -top-16 z-20 w-40 rounded-md border border-card-border bg-background px-2 py-1.5 text-xs shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-foreground">{segment.time}</span>
+                    <span
+                      className={`rounded px-1 py-0.5 text-[10px] font-medium ${
+                        segment.type === "consensus"
+                          ? "bg-emerald-500/20 text-emerald-400"
+                          : segment.type === "alternative"
+                            ? "bg-brand-yellow/20 text-brand-yellow"
+                            : "bg-neutral-700 text-neutral-300"
+                      }`}
+                    >
+                      {segment.type}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-muted">{segment.label}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

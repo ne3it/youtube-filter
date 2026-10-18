@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { SummaryCard } from "@/components/dashboard/summary-card";
 import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
-import type { AnalysisResult, LexicalStatsItem, TimelineDataItem } from "@/types";
+import type { LexicalStatsItem, TimelineDataItem } from "@/types";
 
 const PRESETS = [
   { id: "academic", label: "Академический" },
@@ -19,10 +18,17 @@ export default function Home() {
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
   const [lexicalStats, setLexicalStats] = useState<LexicalStatsItem[]>([]);
   const [timelineData, setTimelineData] = useState<TimelineDataItem[]>([]);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [activeChunkId, setActiveChunkId] = useState<number | null>(null);
+
+  const timelineSegments = timelineData.map((t) => ({
+    time: t.timestamp,
+    type: t.perspective === "alternative" ? ("alternative" as const) : ("consensus" as const),
+    score: t.score,
+    label: t.summary,
+  }));
 
   const handlePresetClick = (presetId: string) => {
     const preset = PRESETS.find((p) => p.id === presetId);
@@ -39,10 +45,10 @@ export default function Home() {
     }
     setLoading(true);
     setError(null);
-    setResult(null);
     setLexicalStats([]);
     setTimelineData([]);
     setSelectedWord(null);
+    setActiveChunkId(null);
 
     try {
       // 1. Получаем чанки субтитров
@@ -165,18 +171,13 @@ export default function Home() {
         </div>
 
         {/* Результаты анализа */}
-        {(result || timelineData.length > 0) && (
+        {timelineData.length > 0 && (
           <div className="mt-12 w-full max-w-4xl space-y-6 animate-fade-in">
-            {result && <SummaryCard result={result} userFocus={focus} />}
-
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2">
                 <TimelineChart
-                  points={result?.semanticTimeline || timelineData.map((t) => ({
-                    t: t.chunkId * 60000,
-                    density: t.score / 100,
-                    label: t.timestamp,
-                  }))}
+                  data={timelineSegments}
+                  onSegmentClick={setActiveChunkId}
                 />
               </div>
               <div>
@@ -187,7 +188,11 @@ export default function Home() {
               </div>
             </div>
 
-            {result && <ThesisList theses={result.theses} />}
+            <ThesisList
+              items={timelineData}
+              activeChunkId={activeChunkId}
+              onChunkClick={setActiveChunkId}
+            />
           </div>
         )}
 

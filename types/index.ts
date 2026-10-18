@@ -94,4 +94,11 @@ export interface TimelineDataItem {
   error?: boolean;
 }
 
+export interface TimelineSegment {
+  time: string;
+  type: "consensus" | "alternative" | "water";
+  score: number;
+  label: string;
+}
+
 export type Theme = "light" | "dark";
