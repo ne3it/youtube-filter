@@ -215,80 +215,128 @@ function decodeHtml(s: string): string {
 }
 
 /**
- * Получает субтитры YouTube через публичные endpoints.
- * Пробует несколько форматов: JSON (youtranscript.com) и XML (timedtext).
+ * Извлекает tracks из HTML-страницы YouTube.
+ * Ищет window["ytInitialPlayerResponse"] = {...};
+ */
+function extractCaptionTracks(html: string): any[] {
+  const patterns = [
+    /window\["ytInitialPlayerResponse"\]\s*=\s*(\{[\s\S]*?\});/,
+    /var\s+ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\});/,
+    /ytInitialPlayerResponse\s*=\s*(\{[\s\S]*?\})\s*;/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        const tracks = parsed?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+        if (Array.isArray(tracks) && tracks.length > 0) return tracks;
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  // Fallback: ищем captionTracks в сыром JSON-образе
+  const trackMatch = html.match(/"captionTracks"\s*:\s*(\[[\s\S]*?\])\s*,\s*"/);
+  if (trackMatch) {
+    try {
+      const tracks = JSON.parse(trackMatch[1]);
+      if (Array.isArray(tracks) && tracks.length > 0) return tracks;
+    } catch {
+      // continue
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Парсит XML-субтитры YouTube (формат timedtext).
+ * Поддерживает srv3 (<p t="ms" d="s">) и классический (<text start="s" dur="s">).
+ */
+function parseTranscriptXml(xml: string): Array<{ text: string; start: number; duration: number }> {
+  const result: Array<{ text: string; start: number; duration: number }> = [];
+
+  // srv3-формат: <p t="1234" d="5.6">Текст</p>
+  const srv3 = xml.matchAll(/<p\s+t="(\d+)"\s+d="([\d.]+)"[^>]*>([^<]*)<\/p>/g);
+  for (const m of srv3) {
+    const text = decodeHtml(m[3]).trim();
+    if (!text) continue;
+    result.push({ text, start: Number(m[1]), duration: Number(m[2]) * 1000 });
+  }
+  if (result.length > 0) return result;
+
+  // Классический формат: <text start="1.5" dur="3.0">Текст</text>
+  const classic = xml.matchAll(/<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([^<]*)<\/text>/g);
+  for (const m of classic) {
+    const text = decodeHtml(m[3]).trim();
+    if (!text) continue;
+    result.push({ text, start: Number(m[1]) * 1000, duration: Number(m[2]) * 1000 });
+  }
+
+  return result;
+}
+
+/**
+ * Получает субтитры YouTube напрямую через парсинг страницы.
+ * Извлекает tracks из ytInitialPlayerResponse, затем грузит XML по baseUrl.
  * Возвращает массив { text, start, duration } (start/duration в миллисекундах).
  */
 export async function fetchTranscript(
   videoId: string,
   lang: string = "en"
 ): Promise<Array<{ text: string; start: number; duration: number }>> {
-  const endpoints = [
-    `https://youtubetranscript.com/?v=${videoId}&lang=${lang}`,
-    `https://youtubetranscript.com/?v=${videoId}`,
-    `https://youtranscript.com/?v=${videoId}&lang=${lang}`,
-  ];
+  // 1. Грузим страницу видео
+  const pageUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const pageRes = await fetch(pageUrl, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    },
+  });
 
-  let lastError: Error | null = null;
-
-  for (const endpoint of endpoints) {
-    try {
-      const res = await fetch(endpoint, {
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; YouTubeFilter/1.0)" },
-      });
-      if (!res.ok) {
-        lastError = new Error(`HTTP ${res.status} for ${endpoint}`);
-        continue;
-      }
-      const text = await res.text();
-
-      // Попытка 1: JSON-массив {text, start, duration}
-      try {
-        const json = JSON.parse(text);
-        if (Array.isArray(json) && json.length > 0) {
-          return json.map((item: any) => ({
-            text: typeof item.text === "string" ? decodeHtml(item.text) : "",
-            start: Number(item.start) || 0,
-            duration: Number(item.duration) || 0,
-          })).filter((s) => s.text.trim().length > 0);
-        }
-      } catch {
-        // Не JSON — пробуем XML
-      }
-
-      // Попытка 2: XML-разметка <text start="s" dur="s">...</text>
-      const xmlMatches = text.matchAll(/<text\s+start="([\d.]+)"\s+dur="([\d.]+)"[^>]*>([^<]*)<\/text>/g);
-      const result: Array<{ text: string; start: number; duration: number }> = [];
-      for (const m of xmlMatches) {
-        const decoded = decodeHtml(m[3]);
-        if (decoded.trim().length === 0) continue;
-        result.push({
-          text: decoded,
-          start: Number(m[1]) * 1000,
-          duration: Number(m[2]) * 1000,
-        });
-      }
-      if (result.length > 0) return result;
-
-      // Попытка 3: srv3-формат <p t="ms" d="s">...</p>
-      const srv3Matches = text.matchAll(/<p\s+t="(\d+)"\s+d="([\d.]+)"[^>]*>([^<]*)<\/p>/g);
-      const srv3Result: Array<{ text: string; start: number; duration: number }> = [];
-      for (const m of srv3Matches) {
-        const decoded = decodeHtml(m[3]);
-        if (decoded.trim().length === 0) continue;
-        srv3Result.push({
-          text: decoded,
-          start: Number(m[1]),
-          duration: Number(m[2]) * 1000,
-        });
-      }
-      if (srv3Result.length > 0) return srv3Result;
-
-      lastError = new Error(`No transcript entries found in response from ${endpoint}`);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-    }
+  if (!pageRes.ok) {
+    throw new Error(`Failed to fetch YouTube page: HTTP ${pageRes.status}`);
   }
 
-  throw lastError || new Error("Could not fetch transcript");
+  const html = await pageRes.text();
+  const tracks = extractCaptionTracks(html);
+
+  if (tracks.length === 0) {
+    throw new Error("No captions available for this video");
+  }
+
+  // 2. Выбираем нужный трек (приоритет: указанный язык, иначе первый доступный)
+  const track = tracks.find((t: any) => t.languageCode === lang) || tracks[0];
+  const baseUrl = track?.baseUrl;
+  if (!baseUrl) {
+    throw new Error("Caption track has no baseUrl");
+  }
+
+  // 3. Грузим XML-субтитры (kind=asr для автогенерированных)
+  const xmlUrl = baseUrl.includes("?") ? `${baseUrl}&kind=asr` : `${baseUrl}?kind=asr`;
+  const xmlRes = await fetch(xmlUrl, {
+    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+  });
+
+  if (!xmlRes.ok) {
+    // Пробуем без kind-параметра
+    const fallbackRes = await fetch(baseUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+    });
+    if (!fallbackRes.ok) {
+      throw new Error(`Failed to fetch transcript XML: HTTP ${fallbackRes.status}`);
+    }
+    const xmlText = await fallbackRes.text();
+    const parsed = parseTranscriptXml(xmlText);
+    if (parsed.length === 0) throw new Error("No transcript entries found in XML");
+    return parsed;
+  }
+
+  const xmlText = await xmlRes.text();
+  const parsed = parseTranscriptXml(xmlText);
+  if (parsed.length === 0) throw new Error("No transcript entries found in XML");
+  return parsed;
 }
