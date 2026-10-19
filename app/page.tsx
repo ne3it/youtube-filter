@@ -5,7 +5,7 @@ import { TimelineChart } from "@/components/dashboard/timeline-chart";
 import { WordCloud } from "@/components/dashboard/word-cloud";
 import { ThesisList } from "@/components/dashboard/thesis-list";
 import { useHistory } from "@/hooks/use-local-storage";
-import { extractVideoId, splitIntoChunks, fetchSubtitlesDirectly } from "@/lib/youtube";
+import { extractVideoId } from "@/lib/youtube";
 import type { HistoryEntry, LexicalStatsItem, TimelineDataItem } from "@/types";
 
 const PRESETS = [
@@ -30,7 +30,6 @@ export default function Home() {
 
   const { entries: history, addEntry, isHydrated } = useHistory();
 
-// Циклические сообщения лоадера
   const loaderMessages = [
     "Скачиваем субтитры через Supadata...",
     "Фильтруем пустую воду...",
@@ -77,62 +76,23 @@ export default function Home() {
         throw new Error("Неверный формат ссылки");
       }
 
-      let chunks: Array<{
-        chunkId: number;
-        timestamp: string;
-        text: string;
-        startTime: number;
-        endTime: number;
-      }> = [];
-
-      // 1. Пробуем получить субтитры через Supadata API
-      const transcriptRes = await fetch("/api/transcript", {
+      const res = await fetch("/api/transcript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
 
-      if (transcriptRes.ok) {
-        const transcriptData = await transcriptRes.json();
-        if (transcriptData.chunks) {
-          chunks = transcriptData.chunks;
-        } else if (transcriptData.requiresFrontendFallback) {
-          // Supadata квота исчерпана — фронтенд сам download через CORS-прокси
-          const subtitles = await fetchSubtitlesDirectly(videoId, "ru");
-          if (!subtitles || subtitles.length === 0) {
-            throw new Error("Субтитры не найдены");
-          }
-          const subtitlesWithDuration = subtitles.map((s) => ({
-            text: s.text,
-            start: s.start * 1000,
-            duration: 3000,
-          }));
-          chunks = splitIntoChunks(subtitlesWithDuration, 300);
-        }
-      } else {
-        // Ошибка от Supadata — фолбэк на фронтенд
-        const err = await transcriptRes.json().catch(() => ({}));
-        if (err.requiresFrontendFallback) {
-          const subtitles = await fetchSubtitlesDirectly(videoId, "ru");
-          if (!subtitles || subtitles.length === 0) {
-            throw new Error("Субтитры не найдены");
-          }
-          const subtitlesWithDuration = subtitles.map((s) => ({
-            text: s.text,
-            start: s.start * 1000,
-            duration: 3000,
-          }));
-          chunks = splitIntoChunks(subtitlesWithDuration, 300);
-        } else {
-          throw new Error(err.error || "Не удалось получить субтитры");
-        }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Не удалось получить субтитры");
       }
 
-      if (chunks.length === 0) {
-        throw new Error("Субтитры не найдены");
+      const { chunks = [] } = await res.json();
+
+      if (!chunks.length) {
+        throw new Error("Субтитры пусты или недоступны");
       }
 
-      // 2. Отправляем чанки в ИИ
       const analyzeRes = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -155,7 +115,6 @@ export default function Home() {
 
       setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
 
-      // 3. Сохраняем в историю
       const entry: HistoryEntry = {
         id: `${videoId}-${Date.now()}`,
         videoId,
@@ -195,7 +154,6 @@ export default function Home() {
     }
   };
 
-  // При клике на сегмент — плавный скролл к карточке
   const handleSegmentClick = (index: number) => {
     setActiveChunkId(index);
     setTimeout(() => {
@@ -206,7 +164,6 @@ export default function Home() {
     }, 100);
   };
 
-  // Клик по истории — мгновенная загрузка без повторных запросов
   const handleHistoryClick = (entry: HistoryEntry) => {
     const stats: LexicalStatsItem[] = entry.result.wordCloud.map((w) => ({
       text: w.word,
@@ -235,7 +192,6 @@ export default function Home() {
             Умное самообразование без инфомусора
           </p>
 
-          {/* Форма */}
           {isLoading ? (
             <div className="rounded-md border border-card-border bg-black/40 p-6 font-mono text-sm">
               <div className="flex items-center gap-2 text-brand-yellow">
@@ -325,7 +281,6 @@ export default function Home() {
 
         </div>
 
-        {/* Результаты анализа */}
         {analysisResult && (
           <div className="mt-12 w-full max-w-4xl space-y-6 animate-fade-in">
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -353,7 +308,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* История проверок */}
         {isHydrated && history.length > 0 && (
           <div className="mt-16 w-full max-w-4xl">
             <h3 className="mb-3 text-sm font-semibold text-foreground">
