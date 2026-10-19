@@ -1,73 +1,54 @@
 import { NextResponse } from "next/server";
-import { extractVideoId, splitIntoChunks } from "@/lib/youtube";
+import { splitIntoChunks } from "@/lib/youtube";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { url } = body;
-
+    const { url } = await request.json();
     if (!url) {
       return NextResponse.json({ error: "URL не указан" }, { status: 400 });
     }
 
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      return NextResponse.json({ error: "Неверный формат ссылки" }, { status: 400 });
-    }
-
     const apiKey = process.env.SUPADATA_API_KEY;
-
-    // Пробуем Supadata API (если ключ есть и квота не исчерпана)
-    if (apiKey) {
-      try {
-        const supadataUrl = `https://api.supadata.ai/transcript?url=${encodeURIComponent(url)}`;
-        const res = await fetch(supadataUrl, {
-          headers: {
-            "x-api-key": apiKey,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const segments = data.data || data.content || data.segments || [];
-          if (Array.isArray(segments) && segments.length > 0) {
-            const subtitles = segments
-              .map((seg: any) => {
-                const text = typeof seg.text === "string" ? seg.text.trim() : "";
-                if (!text) return null;
-                const offset = Number(seg.offset) || 0;
-                const duration = Number(seg.duration) || 0;
-                return { text, start: offset, duration };
-              })
-              .filter((s): s is { text: string; start: number; duration: number } => s !== null);
-
-            if (subtitles.length > 0) {
-              const chunks = splitIntoChunks(subtitles, 300);
-              return NextResponse.json({ videoId, chunks }, { status: 200 });
-            }
-          }
-        }
-
-        // 429/404 — квота исчерпана или видео недоступно, пробуем фронтенд-фолбэк
-        if (res.status === 429 || res.status === 404) {
-          console.warn(`[transcript] Supadata ${res.status}, falling back to frontend CORS proxy`);
-        } else {
-          const errText = await res.text().catch(() => "");
-          console.error(`[transcript] Supadata error ${res.status}:`, errText);
-        }
-      } catch (err) {
-        console.warn("[transcript] Supadata request failed, falling back:", err);
-      }
+    if (!apiKey) {
+      return NextResponse.json({ error: "Ключ Supadata не найден в .env" }, { status: 500 });
     }
 
-    // Фолбэк: возвращаем фронтенд-логику через CORS-прокси
-    return NextResponse.json(
-      { requiresFrontendFallback: true, videoId },
-      { status: 200 }
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Делаем официальный запрос к Supadata, который стабильно обходит блокировки в 2026 году
+    const response = await fetch(`https://supadata.ai${encodeURIComponent(url)}`, {
+      method: "GET",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Supadata Error:", errText);
+      return NextResponse.json({ error: "Не удалось получить субтитры от Supadata" }, { status: response.status });
+    }
+
+    const result = await response.json();
+    // Извлекаем сегменты (в Supadata они лежат в массиве content или data)
+    const segments = result.content || result.data || [];
+
+    if (!segments.length) {
+      return NextResponse.json({ error: "Субтитры пусты или недоступны" }, { status: 404 });
+    }
+
+    // Мапим данные из миллисекунд в секунды
+    const formattedSubtitles = segments.map((seg: any) => ({
+      text: seg.text,
+      start: seg.offset / 1000, // Переводим миллисекунды в секунды
+      duration: (seg.duration || 0) / 1000
+    }));
+
+    const chunks = splitIntoChunks(formattedSubtitles);
+
+    return NextResponse.json({ chunks });
+
+  } catch (error: any) {
+    console.error("Критическая ошибка роутера транскрипта:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
