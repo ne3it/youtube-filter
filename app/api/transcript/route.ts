@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     }
 
     // Делаем официальный запрос к Supadata, который стабильно обходит блокировки в 2026 году
-    const response = await fetch(`https://supadata.ai${encodeURIComponent(url)}`, {
+    const response = await fetch(`https://supadata.ai/v1/transcript?url=${encodeURIComponent(url)}`, {
       method: "GET",
       headers: {
         "x-api-key": apiKey,
