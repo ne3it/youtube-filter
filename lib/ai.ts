@@ -1,5 +1,5 @@
 export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, userFocus: string): Promise<any> {
-  const modelName = "google/gemini-2.5-flash"; 
+  const modelName = "google/gemini-2.5-flash:free"; 
   const apiKey = process.env.AI_API_KEY;
 
   if (!apiKey) {
