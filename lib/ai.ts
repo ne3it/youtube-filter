@@ -25,7 +25,9 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
   "perspective": "consensus",
   "analysis": "Данный фрагмент полностью соответствует общепринятым стандартам...",
   "score": 85
-}`;
+}
+
+Если текст субтитров пришел на английском языке, твоя задача — самостоятельно перевести его смысл и всё равно написать поля summary и analysis на качественном русском языке.`;
 
   try {
     const response = await fetch("https://openrouter.ai", {

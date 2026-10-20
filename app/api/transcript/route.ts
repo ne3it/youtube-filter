@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       : url;
 
     // Делаем официальный запрос к Supadata
-    const response = await fetch(`https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(normalizedUrl)}`, {
+    const response = await fetch(`https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(normalizedUrl)}&lang=ru`, {
       method: "GET",
       headers: {
         "x-api-key": apiKey,
