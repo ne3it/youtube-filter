@@ -1,6 +1,8 @@
 const modelName = "google/gemini-2.5-flash";
 
-const SYSTEM_PROMPT = `You are an impartial AI media-context navigator.
+const SYSTEM_PROMPT = `ВАЖНО: ТЫ ОБЯЗАН ОТВЕЧАТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ. ВСЕ ПОЛЯ ВЕРНУТОГО JSON ОБЪЕКТА ДОЛЖНЫ БЫТЬ НАПИСАНЫ НА КАЧЕСТВЕННОМ И ПОНЯТНОМ РУССКОМ ЯЗЫКЕ.
+
+You are an impartial AI media-context navigator.
 Analyze the video transcript fragment provided with its timestamp.
 Evaluate it strictly through the lens of the user's goal.
 Deliver an objective, intermediate opinion — no toxicity, no subjective "good/bad" verdicts.
@@ -14,7 +16,17 @@ Respond ONLY with a JSON object with EXACTLY these four keys:
 - "analysis": concise, neutral AI intermediate opinion, cross-referenced with known knowledge base.
 - "score": integer 0-100. 0 = pure ad/filler, 100 = pure scientific/practical concentrate.
 
-No other keys. No markdown. No prose outside JSON.`;
+Example:
+{
+  "summary": "Спикер рассуждает о социальных изменениях и предлагает альтернативные гипотезы развития общества...",
+  "perspective": "alternative",
+  "analysis": "Промежуточное мнение ИИ: Данный тезис автора носит субъективный характер и расходится с общепринятыми политологическими и социологическими анализами, которые связывают сдвиги в идеологии с экономическими факторами, а не с целенаправленным вмешательством...",
+  "score": 15
+}
+
+No other keys. No markdown. No prose outside JSON.
+
+Ответь строго на русском языке в формате JSON object. Запрещено использовать английский язык для полей summary и analysis.`;
 
 /**
  * Отправляет один чанк текста в OpenRouter API.
@@ -29,8 +41,7 @@ export async function analyzeChunkWithAI(
     throw new Error("No AI API key configured. Set AI_API_KEY in .env.local");
   }
 
-  // Укорачиваем промпт, чтобы уложиться в FREE лимит токенов
-  const content = `${SYSTEM_PROMPT}\n\nTime: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText.slice(0, 500)}`;
+  const content = `${SYSTEM_PROMPT}\\n\\nTime: ${chunkTime}\\nFocus: ${userFocus}\\nText: ${chunkText.slice(0, 500)}`;
 
   let res: Response;
   try {
@@ -54,7 +65,6 @@ export async function analyzeChunkWithAI(
     return getFallbackResponse();
   }
 
-  // 402 = insufficient credits (FREE тариф исчерпан) — не падаем, возвращаем fallback
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     if (res.status === 402 || res.status === 429) {
@@ -73,13 +83,12 @@ export async function analyzeChunkWithAI(
     return getFallbackResponse();
   }
 
-  // Очищаем возможные markdown-теги ```json перед парсингом
   const cleaned = rawContent
-    .replace(/^```(?:json)?\s*\n?/im, "")
-    .replace(/\n?```\s*$/im, "")
+    .replace(/^```(?:json)?\\s*\\n?/im, "")
+    .replace(/\\n?```\\s*$/im, "")
     .trim();
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  const jsonMatch = cleaned.match(/\\{[\\s\\S]*\\}/);
   if (!jsonMatch) {
     return getFallbackResponse();
   }
@@ -99,10 +108,6 @@ export async function analyzeChunkWithAI(
   };
 }
 
-/**
- * Заглушка — возвращается, если запрос к ИИ упал.
- * Приложение не крашится, а показывает нейтральный consensus с score=0.
- */
 export function getFallbackResponse(): any {
   return {
     summary: "AI analysis unavailable. Using fallback response.",
