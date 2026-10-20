@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { splitIntoChunks } from "@/lib/youtube";
+import { extractVideoId, splitIntoChunks } from "@/lib/youtube";
 
 export async function POST(request: Request) {
   try {
@@ -13,8 +13,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ключ Supadata не найден в .env" }, { status: 500 });
     }
 
+    // Нормализуем ссылку: короткие youtu.be -> длинный youtube.com
+    const videoId = extractVideoId(url);
+    const normalizedUrl = videoId
+      ? `https://www.youtube.com/watch?v=${videoId}`
+      : url;
+
     // Делаем официальный запрос к Supadata, который стабильно обходит блокировки в 2026 году
-    const response = await fetch(`https://supadata.ai/v1/transcript?url=${encodeURIComponent(url)}`, {
+    const response = await fetch(`https://supadata.ai/v1/transcript?url=${encodeURIComponent(normalizedUrl)}`, {
       method: "GET",
       headers: {
         "x-api-key": apiKey,
@@ -23,9 +29,9 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      const errText = await response.text();
-      console.error("Supadata Error:", errText);
-      return NextResponse.json({ error: "Не удалось получить субтитры от Supadata" }, { status: response.status });
+      const errorDetail = await response.text();
+      console.error("ПОДРОБНАЯ ОШИБКА SUPADATA:", errorDetail);
+      return NextResponse.json({ error: `Supadata Error: ${response.status} - ${errorDetail}` }, { status: response.status });
     }
 
     const result = await response.json();
