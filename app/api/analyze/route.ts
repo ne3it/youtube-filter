@@ -49,32 +49,32 @@ export async function POST(req: Request) {
       .sort((a, b) => b.value - a.value)
       .slice(0, 15);
 
-    const timelineData = await Promise.all(
-      chunks.map(async (chunk) => {
-        try {
-          const aiResult = await analyzeChunkWithAI(
-            chunk.text,
-            chunk.timestamp,
-            userFocus || "general analysis"
-          );
-          return {
-            chunkId: chunk.chunkId,
-            timestamp: chunk.timestamp,
-            ...aiResult,
-          };
-        } catch (err) {
-          return {
-            chunkId: chunk.chunkId,
-            timestamp: chunk.timestamp,
-            summary: "",
-            perspective: "consensus",
-            analysis: `Error: ${err instanceof Error ? err.message : "unknown"}`,
-            score: 0,
-            error: true,
-          };
-        }
-      })
-    );
+    const timelineData: any[] = [];
+    for (const chunk of chunks) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        const aiResult = await analyzeChunkWithAI(
+          chunk.text,
+          chunk.timestamp,
+          userFocus || "general analysis"
+        );
+        timelineData.push({
+          chunkId: chunk.chunkId,
+          timestamp: chunk.timestamp,
+          ...aiResult,
+        });
+      } catch (err) {
+        timelineData.push({
+          chunkId: chunk.chunkId,
+          timestamp: chunk.timestamp,
+          summary: "",
+          perspective: "consensus",
+          analysis: `Error: ${err instanceof Error ? err.message : "unknown"}`,
+          score: 0,
+          error: true,
+        });
+      }
+    }
 
     return NextResponse.json({ lexicalStats, timelineData }, { status: 200 });
   } catch (err) {
