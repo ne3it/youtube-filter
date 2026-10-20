@@ -66,7 +66,6 @@ export function splitIntoChunks(
     return [];
   }
 
-  const chunkDurationMs = chunkDurationInSeconds * 1000;
   const chunks: Array<{
     chunkId: number;
     timestamp: string;
@@ -91,11 +90,11 @@ export function splitIntoChunks(
     }
 
     // Если текущий чанк превысил лимит по времени — фиксируем и начинаем новый
-    if (subStart - chunkStart >= chunkDurationMs) {
+    if (subStart - chunkStart >= chunkDurationInSeconds) {
       const text = current.map((s) => s.text).join(" ");
       chunks.push({
         chunkId: chunks.length,
-        timestamp: `${formatTimestamp(chunkStart)} - ${formatTimestamp(chunkEnd)}`,
+        timestamp: `${formatTimestamp(chunkStart * 1000)} - ${formatTimestamp(chunkEnd * 1000)}`,
         text,
         startTime: chunkStart,
         endTime: chunkEnd,
@@ -114,7 +113,7 @@ export function splitIntoChunks(
     const text = current.map((s) => s.text).join(" ");
     chunks.push({
       chunkId: chunks.length,
-      timestamp: `${formatTimestamp(chunkStart)} - ${formatTimestamp(chunkEnd)}`,
+      timestamp: `${formatTimestamp(chunkStart * 1000)} - ${formatTimestamp(chunkEnd * 1000)}`,
       text,
       startTime: chunkStart,
       endTime: chunkEnd,
