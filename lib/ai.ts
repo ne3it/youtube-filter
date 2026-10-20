@@ -1,119 +1,82 @@
-const modelName = "google/gemini-2.5-flash";
+export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, userFocus: string): Promise<any> {
+  const modelName = "google/gemini-2.5-flash"; 
+  const apiKey = process.env.AI_API_KEY;
 
-const SYSTEM_PROMPT = `ВАЖНО: ТЫ ОБЯЗАН ОТВЕЧАТЬ СТРОГО НА РУССКОМ ЯЗЫКЕ. ВСЕ ПОЛЯ ВЕРНУТОГО JSON ОБЪЕКТА ДОЛЖНЫ БЫТЬ НАПИСАНЫ НА КАЧЕСТВЕННОМ И ПОНЯТНОМ РУССКОМ ЯЗЫКЕ.
-
-You are an impartial AI media-context navigator.
-Analyze the video transcript fragment provided with its timestamp.
-Evaluate it strictly through the lens of the user's goal.
-Deliver an objective, intermediate opinion — no toxicity, no subjective "good/bad" verdicts.
-If the author presents an alternative or non-standard viewpoint, do NOT label it as fake science or misinformation.
-Correctly mark it as "alternative" and briefly compare it with the prevailing consensus in this domain.
-Completely ignore filler, fluff, and ad integrations unrelated to the topic.
-
-Respond ONLY with a JSON object with EXACTLY these four keys:
-- "summary": 1-2 sentences capturing the essence of this fragment.
-- "perspective": either "consensus" for standard view or "alternative" for non-standard view.
-- "analysis": concise, neutral AI intermediate opinion, cross-referenced with known knowledge base.
-- "score": integer 0-100. 0 = pure ad/filler, 100 = pure scientific/practical concentrate.
-
-Example:
-{
-  "summary": "Спикер рассуждает о социальных изменениях и предлагает альтернативные гипотезы развития общества...",
-  "perspective": "alternative",
-  "analysis": "Промежуточное мнение ИИ: Данный тезис автора носит субъективный характер и расходится с общепринятыми политологическими и социологическими анализами, которые связывают сдвиги в идеологии с экономическими факторами, а не с целенаправленным вмешательством...",
-  "score": 15
-}
-
-No other keys. No markdown. No prose outside JSON.
-
-Ответь строго на русском языке в формате JSON object. Запрещено использовать английский язык для полей summary и analysis.`;
-
-/**
- * Отправляет один чанк текста в OpenRouter API.
- */
-export async function analyzeChunkWithAI(
-  chunkText: string,
-  chunkTime: string,
-  userFocus: string
-): Promise<any> {
-  const token = process.env.AI_API_KEY;
-  if (!token) {
-    throw new Error("No AI API key configured. Set AI_API_KEY in .env.local");
+  if (!apiKey) {
+    console.error("Критическая ошибка: В .env.local не найден AI_API_KEY");
+    return getFallbackResponse(chunkTime, "В .env.local отсутствует ключ API.");
   }
 
-  const content = `${SYSTEM_PROMPT}\\n\\nTime: ${chunkTime}\\nFocus: ${userFocus}\\nText: ${chunkText.slice(0, 500)}`;
+  const systemPrompt = `Ты — беспристрастный ИИ-навигатор медиа-контекста. Твоя задача — деконструировать текст видео без токсичности, высокомерия и субъективных оценок.
+Анализируй фрагмент текста видео с таймкодом [${chunkTime}] строго через призму фокуса пользователя: "${userFocus}".
 
-  let res: Response;
+ВАЖНОЕ ТРЕБОВАНИЕ: Ты обязан отвечать строго на РУССКОМ ЯЗЫКЕ. Все текстовые поля возвращаемого JSON должны быть написаны на качественном русском языке.
+
+Инструкция:
+1. Сформулируй краткую суть фрагмента в поле "summary" на русском языке (1-2 предложения).
+2. Определи позицию автора в поле "perspective" (строго строка "consensus" — если это стандарт, или "alternative" — если это личные гипотезы, опыт или нестандартный взгляд).
+3. В поле "analysis" напиши емкое промежуточное мнение на русском языке, сопоставив тезисы автора с общепринятой базой знаний.
+4. В поле "score" поставь число от 0 до 100.
+
+ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON OBJECT. Не пиши никаких вступлений, пояснений или markdown-тегов. Только чистый JSON.
+Пример структуры ответа:
+{
+  "summary": "Автор излагает ключевые аспекты темы...",
+  "perspective": "consensus",
+  "analysis": "Данный фрагмент полностью соответствует общепринятым стандартам...",
+  "score": 85
+}`;
+
   try {
-    res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetch("https://openrouter.ai", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "AI Anatomy YouTube Filter",
+        "X-Title": "AI Anatomy YouTube Filter"
       },
       body: JSON.stringify({
         model: modelName,
-        messages: [{ role: "user", content }],
-        max_tokens: 256,
-        temperature: 0.2,
-        response_format: { type: "json_object" },
+        messages: [
+          { role: "user", content: `${systemPrompt}\n\nТекст субтитров для анализа:\n${chunkText}` }
+        ],
+        response_format: { type: "json_object" }
       }),
     });
-  } catch (err) {
-    return getFallbackResponse();
-  }
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    if (res.status === 402 || res.status === 429) {
-      return getFallbackResponse();
+    if (!response.ok) {
+      const errData = await response.text();
+      console.error("OpenRouter Error status:", response.status, errData);
+      return getFallbackResponse(chunkTime, `Код ошибки OpenRouter: ${response.status}`);
     }
-    throw new Error(`OpenRouter error ${res.status}: ${errText}`);
+
+    const data = await response.json();
+    const rawText = data.choices?.[0]?.message?.content;
+
+    if (!rawText) {
+      return getFallbackResponse(chunkTime, "ИИ вернул пустой ответ.");
+    }
+
+    const cleanJsonString = rawText
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    return JSON.parse(cleanJsonString);
+
+  } catch (error: any) {
+    console.error("Ошибка парсинга OpenRouter:", error);
+    return getFallbackResponse(chunkTime, error.message || "Не удалось распарсить JSON.");
   }
-
-  const data = await res.json().catch(() => null);
-  if (!data) {
-    return getFallbackResponse();
-  }
-
-  const rawContent = data.choices?.[0]?.message?.content ?? "";
-  if (!rawContent) {
-    return getFallbackResponse();
-  }
-
-  const cleaned = rawContent
-    .replace(/^```(?:json)?\\s*\\n?/im, "")
-    .replace(/\\n?```\\s*$/im, "")
-    .trim();
-
-  const jsonMatch = cleaned.match(/\\{[\\s\\S]*\\}/);
-  if (!jsonMatch) {
-    return getFallbackResponse();
-  }
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch {
-    return getFallbackResponse();
-  }
-
-  return {
-    summary: typeof parsed.summary === "string" ? parsed.summary : "",
-    perspective: parsed.perspective === "alternative" ? "alternative" : "consensus",
-    analysis: typeof parsed.analysis === "string" ? parsed.analysis : "",
-    score: typeof parsed.score === "number" ? parsed.score : 0,
-  };
 }
 
-export function getFallbackResponse(): any {
+function getFallbackResponse(time: string, reason: string) {
   return {
-    summary: "AI analysis unavailable. Using fallback response.",
+    summary: "AI-анализ временно недоступен.",
     perspective: "consensus",
-    analysis: "Unable to reach AI service. Please check your API key and network connection.",
-    score: 0,
+    analysis: `Используется резервная заглушка. Причина: ${reason}`,
+    score: 0
   };
 }
 
