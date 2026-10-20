@@ -1,5 +1,6 @@
+import { splitIntoChunks } from "@/lib/youtube";
 import { NextResponse } from "next/server";
-import { extractVideoId, splitIntoChunks } from "@/lib/youtube";
+import { extractVideoId } from "@/lib/youtube";
 
 export async function POST(request: Request) {
   try {
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
         await new Promise((res) => setTimeout(res, 2000));
         attempts++;
 
-        const statusRes = await fetch(`https://supadata.ai/v1/transcript/${jobId}`, {
+        const statusRes = await fetch(`https://supadata.ai/${jobId}`, {
           method: "GET",
           headers: {
             "x-api-key": apiKey,
