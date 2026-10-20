@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       : url;
 
     // Делаем официальный запрос к Supadata
-    const response = await fetch(`https://supadata.ai/v1/transcript?url=${encodeURIComponent(normalizedUrl)}`, {
+    const response = await fetch(`https://api.supadata.ai/v1/transcript?url=${encodeURIComponent(normalizedUrl)}`, {
       method: "GET",
       headers: {
         "x-api-key": apiKey,
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
         await new Promise((res) => setTimeout(res, 2000));
         attempts++;
 
-        const statusRes = await fetch(`https://supadata.ai/${jobId}`, {
+        const statusRes = await fetch(`https://api.supadata.ai/v1/transcript/${jobId}`, {
           method: "GET",
           headers: {
             "x-api-key": apiKey,
