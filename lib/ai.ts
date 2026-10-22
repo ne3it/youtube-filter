@@ -1,14 +1,9 @@
-export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, userFocus: string): Promise<any> {
-  const modelName = "google/gemini-2.5-flash:free"; 
-  const apiKey = process.env.AI_API_KEY;
+import { OpenRouter } from "@openrouter/sdk";
 
-  if (!apiKey) {
-    console.error("Критическая ошибка: В .env.local не найден AI_API_KEY");
-    return getFallbackResponse(chunkTime, "В .env.local отсутствует ключ API.");
-  }
+const openrouter = new OpenRouter({ apiKey: process.env.AI_API_KEY });
 
-  const systemPrompt = `Ты — беспристрастный ИИ-навигатор медиа-контекста. Твоя задача — деконструировать текст видео без токсичности, высокомерия и субъективных оценок.
-Анализируй фрагмент текста видео с таймкодом [${chunkTime}] строго через призму фокуса пользователя: "${userFocus}".
+const SYSTEM_PROMPT = `Ты — беспристрастный ИИ-навигатор медиа-контекста. Твоя задача — деконструировать текст видео без токсичности, высокомерия и субъективных оценок.
+Анализируй фрагмент текста видео с таймкодом строго через призму фокуса пользователя.
 
 ВАЖНОЕ ТРЕБОВАНИЕ: Ты обязан отвечать строго на РУССКОМ ЯЗЫКЕ. Все текстовые поля возвращаемого JSON должны быть написаны на качественном русском языке.
 
@@ -18,58 +13,49 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
 3. В поле "analysis" напиши емкое промежуточное мнение на русском языке, сопоставив тезисы автора с общепринятой базой знаний.
 4. В поле "score" поставь число от 0 до 100.
 
-ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON OBJECT. Не пиши никаких вступлений, пояснений или markdown-тегов. Только чистый JSON.
-Пример структуры ответа:
-{
-  "summary": "Автор излагает ключевые аспекты темы...",
-  "perspective": "consensus",
-  "analysis": "Данный фрагмент полностью соответствует общепринятым стандартам...",
-  "score": 85
-}
+ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON OBJECT. ЗАПРЕЩЕНО писать вступления, размышления, приветствия или выводить пояснительный текст. Твой ответ должен начинаться с символа '{' и заканчиваться символом '}'. Все поля заполняй на русском языке.
 
 Если текст субтитров пришел на английском языке, твоя задача — самостоятельно перевести его смысл и всё равно написать поля summary и analysis на качественном русском языке.`;
 
+export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, userFocus: string): Promise<any> {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) {
+    console.error("Критическая ошибка: В .env.local не найден AI_API_KEY");
+    return getFallbackResponse(chunkTime, "В .env.local отсутствует ключ API.");
+  }
+
   try {
-    const response = await fetch("https://openrouter.ai", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "AI Anatomy YouTube Filter"
-      },
-      body: JSON.stringify({
-        model: modelName,
+    let responseText = "";
+    const stream = await openrouter.chat.send({
+      chatRequest: {
+        model: "openrouter/free",
         messages: [
-          { role: "user", content: `${systemPrompt}\n\nТекст субтитров для анализа:\n${chunkText}` }
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: `Time: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText}` },
         ],
-        response_format: { type: "json_object" }
-      }),
+        stream: true,
+      },
     });
 
-    if (!response.ok) {
-      const errData = await response.text();
-      console.error("OpenRouter Error status:", response.status, errData);
-      return getFallbackResponse(chunkTime, `Код ошибки OpenRouter: ${response.status}`);
+    for await (const chunk of stream) {
+      const content = chunk.choices?.[0]?.delta?.content;
+      if (content) responseText += content;
     }
 
-    const data = await response.json();
-    const rawText = data.choices?.[0]?.message?.content;
-
-    if (!rawText) {
-      return getFallbackResponse(chunkTime, "ИИ вернул пустой ответ.");
-    }
-
-    const cleanJsonString = rawText
+    const cleanJsonString = responseText
       .replace(/```json/g, "")
       .replace(/```/g, "")
       .trim();
 
-    return JSON.parse(cleanJsonString);
+    const jsonMatch = cleanJsonString.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return getFallbackResponse(chunkTime, "ИИ вернул не-JSON ответ.");
+    }
 
+    return JSON.parse(jsonMatch[0]);
   } catch (error: any) {
-    console.error("Ошибка парсинга OpenRouter:", error);
-    return getFallbackResponse(chunkTime, error.message || "Не удалось распарсить JSON.");
+    console.error("Ошибка OpenRouter SDK:", error);
+    return getFallbackResponse(chunkTime, error.message || "Не удалось получить ответ.");
   }
 }
 
