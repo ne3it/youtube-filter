@@ -45,7 +45,7 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  const timelineSegments = (analysisResult?.timelineData ?? []).map((t) => ({
+  const timelineSegments = (analysisResult?.timelineData ?? []).map((t: any) => ({
     time: t.timestamp,
     type: t.perspective === "alternative" ? ("alternative" as const) : ("consensus" as const),
     score: t.score,
@@ -93,61 +93,75 @@ export default function Home() {
         throw new Error("Субтитры пусты или недоступны");
       }
 
-      const analyzeRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chunks: chunks.map((c: any) => ({
-            chunkId: c.chunkId,
-            text: c.text,
-            timestamp: c.timestamp,
-          })),
-          userFocus: focus,
-        }),
-      });
-      if (!analyzeRes.ok) {
-        const err = await analyzeRes.json();
-        throw new Error(err.error || "Анализ не удался");
+      setAnalysisResult({ lexicalStats: [], timelineData: [] });
+
+      const timelineData: any[] = [];
+      for (const chunk of chunks) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const analyzeRes = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chunk: {
+                chunkId: chunk.chunkId,
+                text: chunk.text,
+                timestamp: chunk.timestamp,
+              },
+              userFocus: focus,
+            }),
+          });
+          if (!analyzeRes.ok) {
+            const err = await analyzeRes.json().catch(() => ({}));
+            throw new Error(err.error || "Анализ не удался");
+          }
+          const aiResponse = await analyzeRes.json();
+          timelineData.push(aiResponse);
+          setAnalysisResult((prev) => ({
+            lexicalStats: prev?.lexicalStats || [],
+            timelineData: [...(prev?.timelineData || []), aiResponse],
+          }));
+        } catch (err: any) {
+          const fallback = {
+            chunkId: chunk.chunkId,
+            timestamp: chunk.timestamp,
+            summary: "",
+            perspective: "consensus",
+            analysis: `Error: ${err instanceof Error ? err.message : "unknown"}`,
+            score: 0,
+            error: true,
+          };
+          timelineData.push(fallback);
+          setAnalysisResult((prev) => ({
+            lexicalStats: prev?.lexicalStats || [],
+            timelineData: [...(prev?.timelineData || []), fallback],
+          }));
+        }
       }
-      const data = await analyzeRes.json();
-      const stats = data.lexicalStats || [];
-      const timeline = data.timelineData || [];
 
-      setAnalysisResult({ lexicalStats: stats, timelineData: timeline });
+      const fullText = chunks.map((c: any) => c.text).join(" ");
+      const wordCounts = new Map<string, number>();
+      const STOP_WORDS = new Set([
+        "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то",
+        "все", "всё", "всей", "всех", "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за",
+        "бы", "по", "только", "ее", "мне", "было", "быть", "есть", "уже", "еще", "ещё", "вот", "от", "меня", "нет", "о", "из", "до", "них", "ним", "ними", "этом", "эта", "эти",
+        "этот", "это", "этих", "эту", "при", "ли", "ни", "чтобы",
+        "чтоб", "если", "или", "когда", "потом", "тогда", "того", "значит", "сказать", "слова", "будет", "после", "хочу", "очень", "просто", "надо", "там", "они", "мы", "вы", "она", "оно", "его", "ее", "их", "тебе", "нам", "вам", "тебя",
+        "ну", "так", "вот", "уже", "ещё", "только", "просто", "очень", "надо", "значит", "сказать", "будет", "после", "если", "хочу", "can", "the",
+        "and", "to", "is", "of", "in", "that", "it", "this", "you", "well", "are", "very", "he", "all", "be", "on", "for", "with", "as",
+      ]);
+      for (const rawWord of fullText.split(/\s+/)) {
+        const word = rawWord.toLowerCase().replace(/[^a-zа-яё0-9]/g, "");
+        if (!word || word.length < 2 || STOP_WORDS.has(word)) continue;
+        wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+      }
+      const stats = Array.from(wordCounts.entries())
+        .map(([text, value]) => ({ text, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 15);
 
-      const entry: HistoryEntry = {
-        id: `${videoId}-${Date.now()}`,
-        videoId,
-        url: url.trim(),
-        title: `YouTube video ${videoId}`,
-        channel: "Unknown channel",
-        userFocus: focus,
-        result: {
-          videoId,
-          title: `YouTube video ${videoId}`,
-          channel: "Unknown channel",
-          summary: timeline.map((t: TimelineDataItem) => t.summary).filter(Boolean).slice(0, 2).join(" ") || "Анализ завершён.",
-          conceptScores: [],
-          semanticTimeline: [],
-          wordCloud: stats.map((l: LexicalStatsItem) => ({
-            word: l.text,
-            weight: l.value / (stats[0]?.value || 1),
-            sentiment: "neutral" as const,
-          })),
-          theses: timeline.map((t: TimelineDataItem) => ({
-            id: `thesis-${t.chunkId}`,
-            claim: t.summary,
-            support: t.analysis,
-            confidence: t.score / 100,
-            timestamp: t.chunkId * 60000,
-          })),
-          coreConcept: stats[0]?.text || "",
-          generatedAt: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-      addEntry(entry);
-    } catch (err) {
+      setAnalysisResult({ lexicalStats: stats, timelineData });
+    } catch (err: any) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
       setIsLoading(false);
@@ -165,11 +179,11 @@ export default function Home() {
   };
 
   const handleHistoryClick = (entry: HistoryEntry) => {
-    const stats: LexicalStatsItem[] = entry.result.wordCloud.map((w) => ({
+    const stats: LexicalStatsItem[] = entry.result.wordCloud.map((w: any) => ({
       text: w.word,
       value: Math.round(w.weight * 100),
     }));
-    const timeline: TimelineDataItem[] = entry.result.theses.map((t, i) => ({
+    const timeline: TimelineDataItem[] = entry.result.theses.map((t: any, i: number) => ({
       chunkId: i,
       timestamp: "00:00 - 05:00",
       summary: t.claim,
