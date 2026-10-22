@@ -18,13 +18,13 @@ function normalizeWord(word: string): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { chunks, userFocus } = body as {
-      chunks: Array<{ chunkId: number; text: string; timestamp: string }>;
-      userFocus: string;
+    const { chunk, userFocus } = body as {
+      chunk?: { chunkId: number; text: string; timestamp: string };
+      userFocus?: string;
     };
 
-    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
-      return NextResponse.json({ error: "chunks are required" }, { status: 400 });
+    if (!chunk || !chunk.text) {
+      return NextResponse.json({ error: "chunk is required" }, { status: 400 });
     }
 
     const status = getProviderStatus();
@@ -35,48 +35,17 @@ export async function POST(req: Request) {
       );
     }
 
-    const fullText = chunks.map((c) => c.text).join(" ");
-    const wordCounts = new Map<string, number>();
+    const aiResult = await analyzeChunkWithAI(
+      chunk.text,
+      chunk.timestamp,
+      userFocus || "general analysis"
+    );
 
-    for (const rawWord of fullText.split(/\s+/)) {
-      const word = normalizeWord(rawWord);
-      if (!word || word.length < 2 || STOP_WORDS.has(word)) continue;
-      wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
-    }
-
-    const lexicalStats = Array.from(wordCounts.entries())
-      .map(([text, value]) => ({ text, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 15);
-
-    const timelineData: any[] = [];
-    for (const chunk of chunks) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      try {
-        const aiResult = await analyzeChunkWithAI(
-          chunk.text,
-          chunk.timestamp,
-          userFocus || "general analysis"
-        );
-        timelineData.push({
-          chunkId: chunk.chunkId,
-          timestamp: chunk.timestamp,
-          ...aiResult,
-        });
-      } catch (err) {
-        timelineData.push({
-          chunkId: chunk.chunkId,
-          timestamp: chunk.timestamp,
-          summary: "",
-          perspective: "consensus",
-          analysis: `Error: ${err instanceof Error ? err.message : "unknown"}`,
-          score: 0,
-          error: true,
-        });
-      }
-    }
-
-    return NextResponse.json({ lexicalStats, timelineData }, { status: 200 });
+    return NextResponse.json({
+      chunkId: chunk.chunkId,
+      timestamp: chunk.timestamp,
+      ...aiResult,
+    }, { status: 200 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
