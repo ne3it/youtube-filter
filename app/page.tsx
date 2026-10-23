@@ -119,7 +119,7 @@ export default function Home() {
           timelineData.push(aiResponse);
           setAnalysisResult((prev) => ({
             lexicalStats: prev?.lexicalStats || [],
-            timelineData: [...(prev?.timelineData || []), aiResponse],
+            timelineData: [...(prev?.timelineData || []), aiResponse as TimelineDataItem],
           }));
         } catch (err: any) {
           const fallback = {
@@ -134,7 +134,7 @@ export default function Home() {
           timelineData.push(fallback);
           setAnalysisResult((prev) => ({
             lexicalStats: prev?.lexicalStats || [],
-            timelineData: [...(prev?.timelineData || []), fallback],
+            timelineData: [...(prev?.timelineData || []), fallback as TimelineDataItem],
           }));
         }
       }
@@ -160,7 +160,7 @@ export default function Home() {
         .sort((a, b) => b.value - a.value)
         .slice(0, 15);
 
-      setAnalysisResult({ lexicalStats: stats, timelineData });
+      setAnalysisResult({ lexicalStats: stats, timelineData: timelineData as TimelineDataItem[] });
     } catch (err: any) {
       setError(err instanceof Error ? err.message : "Произошла ошибка");
     } finally {
