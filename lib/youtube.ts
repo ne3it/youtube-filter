@@ -249,7 +249,7 @@ function extractCaptionTracks(html: string): any[] {
     try {
       const tracks = JSON.parse(trackMatch[1]);
       if (Array.isArray(tracks) && tracks.length > 0) return tracks;
-    } catch {
+    } catch (_) {
       // continue
     }
   }
@@ -281,7 +281,7 @@ function parseTranscriptResponse(content: string): Array<{ text: string; start: 
       }
       if (result.length > 0) return result;
     }
-  } catch {
+  } catch (_) {
     // Не JSON — пробуем XML
   }
 
@@ -491,7 +491,7 @@ export async function fetchSubtitlesDirectly(
       const html = await res.text();
       captionTracks = extractCaptionTracks(html);
       if (captionTracks.length > 0) break;
-    } catch {
+    } catch (_) {
       continue;
     }
   }
