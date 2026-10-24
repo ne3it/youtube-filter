@@ -97,7 +97,7 @@ export default function Home() {
 
       const timelineData: any[] = [];
       for (const chunk of chunks) {
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, 5000));
         try {
           const analyzeRes = await fetch("/api/analyze", {
             method: "POST",
