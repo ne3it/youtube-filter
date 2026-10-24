@@ -1,6 +1,4 @@
-import { OpenRouter } from "@openrouter/sdk";
-
-const openrouter = new OpenRouter({ apiKey: process.env.AI_API_KEY });
+const modelName = "openrouter/free";
 
 const SYSTEM_PROMPT = `Ты — беспристрастный ИИ-навигатор медиа-контекста. Твоя задача — деконструировать текст видео без токсичности, высокомерия и субъективных оценок.
 Анализируй фрагмент текста видео с таймкодом строго через призму фокуса пользователя.
@@ -27,24 +25,39 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
   }
 
   try {
-    let responseText = "";
-    const stream = await openrouter.chat.send({
-      chatRequest: {
-        model: "openrouter/free",
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "AI Anatomy YouTube Filter",
+      },
+      body: JSON.stringify({
+        model: modelName,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: `Time: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText}` },
         ],
-        stream: true,
-      },
+        temperature: 0.2,
+        max_tokens: 256,
+      }),
     });
 
-    for await (const chunk of stream) {
-      const content = chunk.choices?.[0]?.delta?.content;
-      if (content) responseText += content;
+    if (!response.ok) {
+      const errData = await response.text();
+      console.error("OpenRouter Error status:", response.status, errData);
+      return getFallbackResponse(chunkTime, `Код ошибки OpenRouter: ${response.status}`);
     }
 
-    const cleanJsonString = responseText
+    const data = await response.json();
+    const rawText = data.choices?.[0]?.message?.content;
+
+    if (!rawText) {
+      return getFallbackResponse(chunkTime, "ИИ вернул пустой ответ.");
+    }
+
+    const cleanJsonString = rawText
       .replace(/```json/g, "")
       .replace(/```/g, "")
       .trim();
@@ -56,8 +69,8 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
 
     return JSON.parse(jsonMatch[0]);
   } catch (error: any) {
-    console.error("Ошибка OpenRouter SDK:", error);
-    return getFallbackResponse(chunkTime, error.message || "Не удалось получить ответ.");
+    console.error("Ошибка парсинга OpenRouter:", error);
+    return getFallbackResponse(chunkTime, error.message || "Не удалось распарсить JSON.");
   }
 }
 
