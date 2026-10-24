@@ -1,4 +1,4 @@
-const modelName = "openrouter/free";
+const modelName = "google/gemini-2.5-flash:free";
 
 const SYSTEM_PROMPT = `Ты — беспристрастный ИИ-навигатор медиа-контекста. Твоя задача — деконструировать текст видео без токсичности, высокомерия и субъективных оценок.
 Анализируй фрагмент текста видео с таймкодом строго через призму фокуса пользователя.
@@ -39,6 +39,7 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: `Time: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText}` },
         ],
+        response_format: { type: "json_object" },
         temperature: 0.2,
         max_tokens: 256,
       }),
