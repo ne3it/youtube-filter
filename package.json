@@ -9,7 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+<<<<<<< HEAD
     "@openrouter/sdk": "^1.5.4",
+=======
+    "@openrouter/sdk": "^1.5.7",
+>>>>>>> kilo/real-hub-las
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.408.0",
