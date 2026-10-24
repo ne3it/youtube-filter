@@ -36,8 +36,10 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
       body: JSON.stringify({
         model: modelName,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: `Time: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText}` },
+          {
+            role: "user",
+            content: `${SYSTEM_PROMPT}\n\nВремя фрагмента: ${chunkTime}\nФокус пользователя: ${userFocus}\nТекст субтитров для анализа:\n${chunkText}`,
+          },
         ],
         temperature: 0.2,
         max_tokens: 256,
