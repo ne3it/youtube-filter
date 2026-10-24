@@ -1,4 +1,4 @@
-const modelName = "google/gemini-2.5-flash:free";
+const modelName = "openrouter/free";
 
 const SYSTEM_PROMPT = `Ты — беспристрастный ИИ-навигатор медиа-контекста. Твоя задача — деконструировать текст видео без токсичности, высокомерия и субъективных оценок.
 Анализируй фрагмент текста видео с таймкодом строго через призму фокуса пользователя.
@@ -28,7 +28,7 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:3000",
         "X-Title": "AI Anatomy YouTube Filter",
@@ -39,7 +39,6 @@ export async function analyzeChunkWithAI(chunkText: string, chunkTime: string, u
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: `Time: ${chunkTime}\nFocus: ${userFocus}\nText: ${chunkText}` },
         ],
-        response_format: { type: "json_object" },
         temperature: 0.2,
         max_tokens: 256,
       }),
